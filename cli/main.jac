@@ -1,95 +1,207 @@
 import argparse;
 import asyncio;
 import sys;
-
-glob PROG: str = "jacorg",
-     DEFAULT_LIMIT: int = 20;
-
-obj Invocation {
-    has command: str = "",
-        action: str = "",
-        repo: str = "",
-        as_json: bool = False,
-        limit: int = DEFAULT_LIMIT,
-        query: str = "",
-        text: str = "";
+import from jaclang.server.bridge { BridgeError }
+import from core.planner_service {
+    DashboardData,
+    SessionView,
+    TaskView,
+    add_reserved_block,
+    add_task,
+    complete_session,
+    delete_reserved_block,
+    get_dashboard,
+    replan,
+    save_planning_window,
+    seed_demo,
+    seed_routine,
+    toggle_task
 }
 
-def build_parser -> argparse.ArgumentParser {
-    parser = argparse.ArgumentParser(
+glob PROG: str = "studyflow";
+
+obj Invocation {
+    has command: str = "", title: str = "", course: str = "General",
+        due: str = "", minutes: int = 60, priority: str = "medium",
+        item_id: str = "", start_hour: int = 8, end_hour: int = 23,
+        label: str = "", category: str = "other", start_time: str = "",
+        end_time: str = "", repeat_rule: str = "daily";
+}
+
+def parser -> argparse.ArgumentParser {
+    root_parser = argparse.ArgumentParser(
         prog=PROG,
-        description="The command-line face of jaclang.org. "
-        "`score` runs offline; the rest talk to a running site."
+        description="Plan coursework from the terminal using the shared StudyFlow server."
     );
-    commands = parser.add_subparsers(
-        dest="command", metavar="<command>", required=True
+    commands = root_parser.add_subparsers(dest="command", required=True);
+    commands.add_parser("today", help="show today's scheduled study blocks");
+    commands.add_parser("list", help="show all assignments");
+    commands.add_parser("replan", help="redistribute unfinished work");
+    commands.add_parser("demo", help="add a sample week when the planner is empty");
+    commands.add_parser("routine", help="add example protected-time routines");
+
+    add = commands.add_parser("add", help="add and automatically schedule an assignment");
+    add.add_argument("title", help="assignment title");
+    add.add_argument("--course", `default="General", help="course name");
+    add.add_argument("--due", required=True, help="due date (YYYY-MM-DD)");
+    add.add_argument("--minutes", `type=int, `default=60, help="estimated work in minutes");
+    add.add_argument(
+        "--priority", choices=["high", "medium", "low"], `default="medium"
     );
-    scorer = commands.add_parser(
-        "score", help="score a GitHub repo against the ninja rubric, offline"
-    );
-    scorer.add_argument("repo", help="owner/name or a github.com URL");
-    scorer.add_argument(
-        "--json",
-        dest="as_json",
-        action="store_true",
-        help="print the breakdown as JSON"
-    );
-    docs = commands.add_parser("docs", help="the docs graph of a running site");
-    docs.add_argument(
-        "action",
-        choices=["sync", "status"],
-        help="sync: ask the site to ingest its bundled docs; status: what the graph holds"
-    );
-    feed = commands.add_parser(
-        "feed", help="read your JacYac feed from a running site"
-    );
-    feed.add_argument(
-        "--limit",
-        `type=int,
-        `default=DEFAULT_LIMIT,
-        help="how many tweets to show (default " + str(DEFAULT_LIMIT) + ")"
-    );
-    feed.add_argument(
-        "--search", dest="query", `default="", help="only tweets containing this text"
-    );
-    post = commands.add_parser("post", help="post to JacYac through a running site");
-    post.add_argument("text", help="what to say");
-    return parser;
+
+    done = commands.add_parser("done", help="complete a study session by id");
+    done.add_argument("item_id", help="session id shown by `today`");
+    task_done = commands.add_parser("task-done", help="toggle an assignment by id");
+    task_done.add_argument("item_id", help="task id shown by `list`");
+
+    settings = commands.add_parser("settings", help="set the daily planning window");
+    settings.add_argument("--start", dest="start_hour", `type=int, `default=8);
+    settings.add_argument("--end", dest="end_hour", `type=int, `default=23);
+
+    block = commands.add_parser("block", help="protect recurring time from study sessions");
+    block.add_argument("label", help="name such as Sleep or Class");
+    block.add_argument("--category", choices=["sleep", "meal", "class", "exercise", "commute", "other"], `default="other");
+    block.add_argument("--start", dest="start_time", required=True, help="start time (HH:MM)");
+    block.add_argument("--end", dest="end_time", required=True, help="end time (HH:MM)");
+    block.add_argument("--repeat", dest="repeat_rule", choices=["daily", "weekdays", "weekends"], `default="daily");
+
+    unblock = commands.add_parser("unblock", help="remove protected time by id");
+    unblock.add_argument("item_id", help="protected-time id shown by `today`");
+    return root_parser;
 }
 
 def parse_args(argv: list[str]) -> Invocation {
-    parser = build_parser();
-    ns = parser.parse_args(argv);
-    inv = Invocation(
-        command=str(getattr(ns, "command", "") or ""),
-        action=str(getattr(ns, "action", "") or ""),
-        repo=str(getattr(ns, "repo", "") or ""),
-        as_json=bool(getattr(ns, "as_json", False)),
-        limit=int(getattr(ns, "limit", DEFAULT_LIMIT)),
-        query=str(getattr(ns, "query", "") or ""),
-        text=str(getattr(ns, "text", "") or "")
+    ns = parser().parse_args(argv);
+    return Invocation(
+        command=str(getattr(ns, "command", "")),
+        title=str(getattr(ns, "title", "")),
+        course=str(getattr(ns, "course", "General")),
+        due=str(getattr(ns, "due", "")),
+        minutes=int(getattr(ns, "minutes", 60)),
+        priority=str(getattr(ns, "priority", "medium")),
+        item_id=str(getattr(ns, "item_id", "")),
+        start_hour=int(getattr(ns, "start_hour", 8)),
+        end_hour=int(getattr(ns, "end_hour", 23)),
+        label=str(getattr(ns, "label", "")),
+        category=str(getattr(ns, "category", "other")),
+        start_time=str(getattr(ns, "start_time", "")),
+        end_time=str(getattr(ns, "end_time", "")),
+        repeat_rule=str(getattr(ns, "repeat_rule", "daily"))
     );
-    if inv.limit < 1 {
-        parser.error("--limit must be at least 1");
+}
+
+def minute_text(total: int) -> str {
+    hour = total // 60;
+    minute = total % 60;
+    if hour > 0 and minute > 0 { return f"{hour}h {minute}m"; }
+    if hour > 0 { return f"{hour}h"; }
+    return f"{minute}m";
+}
+
+def print_today(data: DashboardData) {
+    print(f"\nTODAY — {data.today}");
+    print("=" * 58);
+    if not data.today_sessions {
+        print("No sessions scheduled. Add a task or run `studyflow demo`.");
     }
-    return inv;
+    for session in data.today_sessions {
+        mark = "x" if session.completed else " ";
+        print(
+            f"[{mark}] {session.start_time:<9} {session.course:<12} "
+            f"{session.title} ({minute_text(session.duration)})"
+        );
+        print(f"    id: {session.id}");
+    }
+    total = sum([s.duration for s in data.today_sessions]);
+    print("-" * 58);
+    print(f"Total planned: {minute_text(total)}");
+    if data.overload_minutes > 0 {
+        print(f"Attention: {minute_text(data.overload_minutes)} could not fit before deadlines.");
+    }
+    if data.reserved_blocks {
+        print("\nPROTECTED TIME");
+        for block in data.reserved_blocks {
+            print(f"- {block.label}: {block.start_time}–{block.end_time} ({block.repeat_rule})");
+            print(f"  id: {block.id}");
+        }
+    }
+}
+
+def print_tasks(data: DashboardData) {
+    print("\nASSIGNMENTS");
+    print("=" * 72);
+    if not data.tasks { print("No assignments yet."); }
+    for task in data.tasks {
+        mark = "x" if task.completed else " ";
+        print(
+            f"[{mark}] {task.course:<12} {task.title:<28} "
+            f"{task.progress:>3}%  {task.due_label}"
+        );
+        print(f"    id: {task.id}");
+    }
+    print("-" * 72);
+    print(
+        f"{data.active_tasks} active · {data.completed_tasks} completed · "
+        f"{minute_text(data.remaining_minutes)} remaining"
+    );
 }
 
 async def dispatch(inv: Invocation) -> int {
-    if inv.command == "score" {
-        return run_score(inv.repo, inv.as_json);
+    try {
+        if inv.command == "today" {
+            print_today(await get_dashboard());
+        } elif inv.command == "list" {
+            print_tasks(await get_dashboard());
+        } elif inv.command == "add" {
+            data = await add_task(
+                inv.title, inv.course, inv.due, inv.minutes, inv.priority
+            );
+            print(data.message);
+            print_tasks(data);
+        } elif inv.command == "done" {
+            data = await complete_session(inv.item_id);
+            print(data.message);
+            print_today(data);
+        } elif inv.command == "task-done" {
+            data = await toggle_task(inv.item_id);
+            print(data.message);
+            print_tasks(data);
+        } elif inv.command == "replan" {
+            data = await replan();
+            print(data.message);
+            print_today(data);
+        } elif inv.command == "settings" {
+            data = await save_planning_window(inv.start_hour, inv.end_hour);
+            print(data.message);
+            print_today(data);
+        } elif inv.command == "block" {
+            data = await add_reserved_block(
+                inv.label, inv.category, inv.start_time, inv.end_time, inv.repeat_rule
+            );
+            print(data.message);
+            print_today(data);
+        } elif inv.command == "unblock" {
+            data = await delete_reserved_block(inv.item_id);
+            print(data.message);
+            print_today(data);
+        } elif inv.command == "routine" {
+            data = await seed_routine();
+            print(data.message);
+            print_today(data);
+        } elif inv.command == "demo" {
+            data = await seed_demo();
+            print(data.message);
+            print_today(data);
+        }
+        return 0;
+    } except BridgeError as e {
+        print("studyflow: planner server is unavailable: " + str(e), file=sys.stderr);
+        print("hint: start it with `jac run`", file=sys.stderr);
+        return 3;
+    } except Exception as e {
+        print("studyflow: " + str(e), file=sys.stderr);
+        return 1;
     }
-    if inv.command == "docs" {
-        return await run_docs(inv.action);
-    }
-    if inv.command == "feed" {
-        return await run_feed(inv.limit, inv.query);
-    }
-    if inv.command == "post" {
-        return await run_post(inv.text);
-    }
-    warn("jacorg: unknown command " + inv.command);
-    return EXIT_USAGE;
 }
 
 async def main(argv: list[str]) -> int {
