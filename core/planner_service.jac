@@ -1,4 +1,4 @@
-import from datetime { date, timedelta }
+import from datetime { date, datetime, timedelta }
 
 obj TaskView {
     has id: str, title: str, course: str, due_date: str,
@@ -220,9 +220,30 @@ def:priv reserved_spans(day_value: date) -> list[tuple[int, int]] {
     return spans;
 }
 
+def:priv now_minute -> int {
+    now = datetime.now();
+    return now.hour * 60 + now.minute;
+}
+
+# Earliest minute work may be planned on a day: the planning window start,
+# or for today the next quarter hour from now -- never in the past.
+def:priv day_start(day_value: date, window_start: int) -> int {
+    if day_value != date.today() { return window_start; }
+    upcoming = ((now_minute() + 14) // 15) * 15;
+    return max(window_start, upcoming);
+}
+
+def:priv is_missed(session: StudySession) -> bool {
+    if session.completed { return False; }
+    today_key = date.today().isoformat();
+    if session.day < today_key { return True; }
+    return session.day == today_key
+        and session.start_minute + session.duration <= now_minute();
+}
+
 def:priv base_available_minutes(day_value: date) -> int {
     settings = get_settings_node();
-    start = settings.start_hour * 60;
+    start = day_start(day_value, settings.start_hour * 60);
     finish = settings.end_hour * 60;
     occupied = reserved_spans(day_value);
     occupied.sort(key=lambda (span: tuple[int, int]) { span[0]; });
@@ -241,7 +262,7 @@ def:priv base_available_minutes(day_value: date) -> int {
 
 def:priv free_slots(day_value: date) -> list[tuple[int, int]] {
     settings = get_settings_node();
-    start = settings.start_hour * 60;
+    start = day_start(day_value, settings.start_hour * 60);
     finish = settings.end_hour * 60;
     occupied = reserved_spans(day_value);
     day_key = day_value.isoformat();
@@ -346,8 +367,7 @@ def:priv session_view(session: StudySession) -> SessionView {
         priority=session.priority, completed=session.completed,
         color=course_color(session.course),
         end_time=clock_label(session.start_minute + session.duration),
-        missed=(not session.completed
-            and session.day < date.today().isoformat())
+        missed=is_missed(session)
     );
 }
 
@@ -554,11 +574,7 @@ def:pub complete_session(session_id: str) -> DashboardData {
 }
 
 def:pub replan -> DashboardData {
-    today_key = date.today().isoformat();
-    missed = [
-        item for item in [root-->][?:StudySession]
-        if not item.completed and item.day < today_key
-    ];
+    missed = [item for item in [root-->][?:StudySession] if is_missed(item)];
     moved_minutes = sum([item.duration for item in missed]);
     unscheduled = rebuild_schedule();
     scheduled = [
@@ -859,22 +875,59 @@ test "adding a task creates scheduled study time" {
     delete_task(matches[0].id);
 }
 
-test "long work can use multiple sessions in one free interval" {
+test "long work is fully placed before its deadline" {
     marker = "StudyFlow long-session test";
     for old in list([root-->][?:Task]) {
         if old.title == marker { delete_task(jid(old)); }
     }
     result = add_task(
-        marker, "TEST 201", date.today().isoformat(), 300, "high"
+        marker, "TEST 201", (date.today() + timedelta(days=3)).isoformat(),
+        300, "high"
     );
     matches = [task for task in result.tasks if task.title == marker];
     assert len(matches) == 1;
     planned = sum([
-        session.duration for session in result.today_sessions
+        session.duration for session in [root-->][?:StudySession]
         if session.task_id == matches[0].id
     ]);
     assert planned == 300;
     delete_task(matches[0].id);
+}
+
+test "today's work is never planned in the past" {
+    marker = "StudyFlow no-past test";
+    for old in list([root-->][?:Task]) {
+        if old.title == marker { delete_task(jid(old)); }
+    }
+    result = add_task(marker, "TEST 501", "2099-12-31", 120, "medium");
+    matches = [task for task in result.tasks if task.title == marker];
+    today_key = date.today().isoformat();
+    for session in [root-->][?:StudySession] {
+        if session.task_id == matches[0].id and session.day == today_key {
+            assert session.start_minute >= now_minute();
+        }
+    }
+    future = date.today() + timedelta(days=1);
+    assert day_start(future, 8 * 60) == 8 * 60;
+    assert day_start(date.today(), 0) >= now_minute();
+    delete_task(matches[0].id);
+}
+
+test "unfinished blocks from earlier are missed" {
+    yesterday = (date.today() - timedelta(days=1)).isoformat();
+    old = StudySession(
+        task_id="x", title="t", course="c", day=yesterday,
+        start_time="", start_minute=600, duration=60
+    );
+    assert is_missed(old);
+    old.completed = True;
+    assert not is_missed(old);
+    later = StudySession(
+        task_id="x", title="t", course="c",
+        day=(date.today() + timedelta(days=1)).isoformat(),
+        start_time="", start_minute=600, duration=60
+    );
+    assert not is_missed(later);
 }
 
 test "calendar views cover full weeks and months" {
