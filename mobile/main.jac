@@ -126,7 +126,7 @@ def MobileBlock(block: ReservedBlockView, onDelete: Callable[[str], None]) -> Js
         <View style={styles.blockDot}/>
         <View style={styles.blockCopy}>
             <Text style={styles.blockTitle}>{block.label}</Text>
-            <Text style={styles.muted}>{block.start_time}{" – "}{block.end_time}{" · "}{block.repeat_rule}</Text>
+            <Text style={styles.muted}>{block.start_time}{" – "}{block.end_time}{" · "}{block.repeat_label or block.repeat_rule}</Text>
         </View>
         <Pressable onPress={lambda { onDelete(block.id); }}>
             <Text style={styles.removeText}>Remove</Text>
@@ -291,10 +291,10 @@ def:pub app -> JsxElement {
 
             <View style={styles.panel}>
                 <View style={styles.panelHeading}>
-                    <Text style={styles.panelTitle}>Protected time</Text>
+                    <Text style={styles.panelTitle}>Reserved time</Text>
                     <Text style={styles.badge}>{str(len(data.reserved_blocks))} routines</Text>
                 </View>
-                <Text style={styles.helper}>Study sessions will never be placed over sleep, meals, classes, exercise, or commuting.</Text>
+                <Text style={styles.helper}>Planned work is never placed over sleep, meals, classes, exercise, or commuting.</Text>
                 {if len(data.reserved_blocks) == 0 {
                     <Pressable style={styles.secondary} onPress={loadRoutine}>
                         <Text style={styles.secondaryText}>Use example routine</Text>

@@ -26,7 +26,7 @@ CLI quick capture ──┘      scheduling logic     Tasks + Sessions + Setting
 ```
 
 - **Server:** CRUD, persistence, validation, automatic scheduling, replanning, progress calculation, and workload summaries in `core/planner_service.jac`.
-- **Web:** responsive dashboard for assignment management, today’s plan, workload visualization, recurring protected time, and replanning.
+- **Web:** at-a-glance dashboard with Day / Week / Month calendar views (study sessions, busy times, and deadlines color-coded by course), a schedule-status card that flags missed sessions, overdue tasks, and work that does not fit, one-click rescheduling, and task / busy-time management in dialogs.
 - **Mobile:** focused execution interface for viewing today’s plan, completing sessions/tasks, quickly adding assignments, managing protected time, and replanning.
 - **CLI:** `add`, `today`, `list`, `done`, `task-done`, `block`, `unblock`, `routine`, `settings`, `replan`, and `demo` commands.
 
@@ -80,6 +80,7 @@ jac run cli -- done SESSION_ID
 jac run cli -- task-done TASK_ID
 jac run cli -- settings --start 8 --end 23
 jac run cli -- block "Sleep" --category sleep --start 23:00 --end 08:00 --repeat daily
+jac run cli -- block "EECS 482 lecture" --category class --start 10:30 --end 12:00 --repeat mon,wed,fri
 jac run cli -- routine
 jac run cli -- replan
 ```

@@ -34,11 +34,11 @@ def parser -> argparse.ArgumentParser {
         description="Plan coursework from the terminal using the shared StudyFlow server."
     );
     commands = root_parser.add_subparsers(dest="command", required=True);
-    commands.add_parser("today", help="show today's scheduled study blocks");
+    commands.add_parser("today", help="show today's planned work blocks");
     commands.add_parser("list", help="show all assignments");
     commands.add_parser("replan", help="redistribute unfinished work");
     commands.add_parser("demo", help="add a sample week when the planner is empty");
-    commands.add_parser("routine", help="add example protected-time routines");
+    commands.add_parser("routine", help="add example reserved-time routines");
 
     add = commands.add_parser("add", help="add and automatically schedule an assignment");
     add.add_argument("title", help="assignment title");
@@ -49,7 +49,7 @@ def parser -> argparse.ArgumentParser {
         "--priority", choices=["high", "medium", "low"], `default="medium"
     );
 
-    done = commands.add_parser("done", help="complete a study session by id");
+    done = commands.add_parser("done", help="complete a work block by id");
     done.add_argument("item_id", help="session id shown by `today`");
     task_done = commands.add_parser("task-done", help="toggle an assignment by id");
     task_done.add_argument("item_id", help="task id shown by `list`");
@@ -58,15 +58,15 @@ def parser -> argparse.ArgumentParser {
     settings.add_argument("--start", dest="start_hour", `type=int, `default=8);
     settings.add_argument("--end", dest="end_hour", `type=int, `default=23);
 
-    block = commands.add_parser("block", help="protect recurring time from study sessions");
+    block = commands.add_parser("block", help="reserve recurring time so no work is planned there");
     block.add_argument("label", help="name such as Sleep or Class");
     block.add_argument("--category", choices=["sleep", "meal", "class", "exercise", "commute", "other"], `default="other");
     block.add_argument("--start", dest="start_time", required=True, help="start time (HH:MM)");
     block.add_argument("--end", dest="end_time", required=True, help="end time (HH:MM)");
-    block.add_argument("--repeat", dest="repeat_rule", choices=["daily", "weekdays", "weekends"], `default="daily");
+    block.add_argument("--repeat", dest="repeat_rule", `default="daily", help="daily, weekdays, weekends, or days like mon,wed,fri");
 
-    unblock = commands.add_parser("unblock", help="remove protected time by id");
-    unblock.add_argument("item_id", help="protected-time id shown by `today`");
+    unblock = commands.add_parser("unblock", help="remove reserved time by id");
+    unblock.add_argument("item_id", help="reserved-time id shown by `today`");
     return root_parser;
 }
 
@@ -119,9 +119,9 @@ def print_today(data: DashboardData) {
         print(f"Attention: {minute_text(data.overload_minutes)} could not fit before deadlines.");
     }
     if data.reserved_blocks {
-        print("\nPROTECTED TIME");
+        print("\nRESERVED TIME");
         for block in data.reserved_blocks {
-            print(f"- {block.label}: {block.start_time}–{block.end_time} ({block.repeat_rule})");
+            print(f"- {block.label}: {block.start_time}–{block.end_time} ({block.repeat_label or block.repeat_rule})");
             print(f"  id: {block.id}");
         }
     }
