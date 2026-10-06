@@ -129,7 +129,6 @@ Notes:
 
 - With Jac 0.37.23, `jac run --dev mobile` also tries an Android build and ends with an *Android SDK license* message. Metro and Expo Go keep working, so ignore it when testing with Expo Go. Accept the license only if you want an Android emulator or APK.
 - If `jac run` printed an API port other than `8001`, change it in `mobile/api_base.native.jac`.
-- `jac run --dev --platform web mobile` previews the phone screens in a browser. Don't run it at the same time as the web dev server, because the two share Jac's build folder.
 
 ## Staying in sync
 
