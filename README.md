@@ -1,48 +1,55 @@
 # StudyFlow
 
-> A personal academic planner that turns assignments, deadlines, and estimated workloads into a realistic daily study plan.
+> A to-do list that schedules itself: add tasks with a deadline and an estimate, and StudyFlow places the work into your free time around classes, sleep, and meals.
 
 **Author:** Shea Shin<br>
 **UMID:** 78273912
 
-![StudyFlow dashboard](docs/studyflow-dashboard.png)
+![StudyFlow web dashboard](docs/studyflow-dashboard.png)
 
-StudyFlow is a four-component Jac application built for CSE 449 Extra Credit Assignment 1. Instead of stopping at a list of deadlines, it automatically divides unfinished work into focused study sessions, works around protected routines such as sleep and class, and replans the week when work changes.
+StudyFlow is a four-component Jac application (server, web, mobile, CLI) built for CSE 449 Extra Credit Assignment 1. Every component talks to the same planner service and the same persisted graph, so a task added from the terminal shows up on the web calendar and can be checked off on the phone.
 
-## Why it stands out
+## Main features
 
-- **Useful:** converts estimated work into concrete, time-blocked sessions.
-- **Coherent:** Web, Mobile, and CLI expose workflows suited to each interface rather than duplicating one UI.
-- **Deep:** deterministic scheduling considers deadlines, priority, remaining work, completed sessions, the planning window, and recurring protected time.
-- **Reliable:** validates dates and estimates, preserves data in Jac's graph store, reports overloaded schedules, and includes automated scheduler tests.
-- **Integrated:** every interface calls the same Jac service and reads the same persisted `Task`, `StudySession`, `ReservedBlock`, and `PlannerSettings` nodes.
+- **Self-scheduling to-do list.** Each task has a due date (and optional due time), an estimate, a priority, a course, and an optional location. The scheduler splits the work into blocks between now and the deadline, finishing before the due time.
+- **Reserved time.** Recurring commitments (class, sleep, meals, work) on any set of weekdays (e.g. Mon/Wed/Fri). Work is never placed there, and reserved times cannot overlap each other.
+- **Today checklist.** Check a block off (or undo it). Progress, missed blocks, locations, and "Rescheduled from …" history are shown inline.
+- **Stable plan + Reschedule.** Checking things off never reshuffles your day. A status card tells you when a Reschedule would help (missed or overlapping blocks, work that is not planned yet, or free time that opened up) and Reschedule re-plans only unfinished work from the current time.
+- **Calendar.** Day / Week / Month views with per-task colors (same course, same color), a deadline line, and a time axis that stretches busy hours and shrinks reserved or empty ones. Hover or tap any block for a detail bubble; hovering a Today item highlights its block.
+- **Tasks list.** Open / Done tabs, sorted by priority then due date, with Done, Reopen, edit, and delete.
+- **Readable errors.** Validation problems ("Due date cannot be in the past.") and connection problems are shown as plain sentences in every interface.
 
 ## Components
 
 ```text
-Web planning center ─┐
-Mobile execution UI ├──> Planner service ───> Jac persistent graph
-CLI quick capture ──┘      scheduling logic     Tasks + Sessions + Settings
+Web  (planning + calendar) ─┐
+Mobile (today + quick add) ├──> Planner service (core/planner_service.jac) ──> Jac persistent graph
+CLI  (terminal capture)    ─┘      scheduling, validation, progress             Task, StudySession, ReservedBlock
 ```
 
-- **Server:** CRUD, persistence, validation, automatic scheduling, replanning, progress calculation, and workload summaries in `core/planner_service.jac`.
-- **Web:** at-a-glance dashboard with Day / Week / Month calendar views (study sessions, busy times, and deadlines color-coded by course), a schedule-status card that flags missed sessions, overdue tasks, and work that does not fit, one-click rescheduling, and task / busy-time management in dialogs.
-- **Mobile:** focused execution interface for viewing today’s plan, completing sessions/tasks, quickly adding assignments, managing protected time, and replanning.
-- **CLI:** `add`, `today`, `list`, `done`, `task-done`, `block`, `unblock`, `routine`, `settings`, `replan`, and `demo` commands.
+- **Server** (`core/planner_service.jac`): the data model, validation, the scheduler (incremental placement, full Reschedule, and a dry-run used for the status card), calendar layout, and tests. Shared error wording lives in `core/errors.jac`.
+- **Web** (`web/`): the full planning interface described above.
+- **Mobile** (`mobile/main.jac`): today's to-do list with check/uncheck, the reschedule status and button, open tasks with Done, quick add (with due time and location), and reserved-time management.
+- **CLI** (`cli/main.jac`): `add`, `today`, `list`, `done`, `task-done`, `block`, `unblock`, `routine`, `replan`, and `demo`.
+
+## What makes it stand out
+
+- **It plans, not just lists.** Work is placed into real free time, respecting due times, reserved time, the current time, and priority.
+- **Predictable.** The plan only moves when you ask. Every moved block says where it came from, and the status card explains why a Reschedule is suggested. The suggestion comes from simulating the Reschedule without saving it.
+- **One system, three interfaces.** Web, mobile, and CLI share the same service, data, validation, and error messages.
+- **Tested.** 37 automated tests cover scheduling, deadlines and due times, reserved-time overlap, check/uncheck/Done/Reopen, move history, calendar layout, and error handling.
 
 ## Prerequisites
 
-- Jac `0.37.23` (the project pins this version in `jac.toml`)
+- Jac `0.37.23` (pinned in `jac.toml`)
 - A modern browser
-- For native mobile use: Expo-compatible Android/iOS tooling or Expo Go
-
-Verify Jac:
+- For a native phone build: Expo-compatible Android/iOS tooling or Expo Go
 
 ```bash
 jac --version
 ```
 
-## Run the Web app and server
+## Run the web app and server
 
 From the repository root:
 
@@ -50,116 +57,112 @@ From the repository root:
 jac run
 ```
 
-Open the Web URL printed by Jac (with Jac 0.37.23 the default is [http://localhost:8003](http://localhost:8003)). The planner service starts alongside the Web app, prints its API URL (default `http://localhost:8002`), and persists data between runs.
+This serves the web app and the planner service together and keeps data between runs. Open the web URL that Jac prints (by default `http://localhost:8000`; the API is printed too, by default `http://localhost:8001`). If those ports are busy, Jac picks others, so use the printed values.
 
-For hot reload during development:
+For hot reload while developing: `jac run --dev`.
 
-```bash
-jac run --dev
-```
-
-Both commands print the active Web and API ports; use those printed values if your local ports differ.
+New here? Click **Load demo tasks** in the Tasks panel and **Use a typical student routine** under Reserved time.
 
 ## Use the CLI
 
-Keep the Web/server process running. In another terminal, point the CLI bridge at the colocated planner service.
-
-With the default API port:
+Keep `jac run` running. In another terminal, point the CLI at the planner service (use the API port `jac run` printed):
 
 ```bash
-export JAC_APP_PLANNER_URL=http://localhost:8002/api/planner
+export JAC_APP_PLANNER_URL=http://localhost:8001/api/planner
 ```
 
-Then run:
+Then:
 
 ```bash
 jac run cli -- today
 jac run cli -- list
-jac run cli -- add "Finish CSE 449 project" --course "CSE 449" --due 2026-10-02 --minutes 240 --priority high
-jac run cli -- done SESSION_ID
-jac run cli -- task-done TASK_ID
-jac run cli -- settings --start 8 --end 23
+jac run cli -- add "Finish CSE 449 project" --course "CSE 449" --due 2026-10-09 --minutes 240 --priority high
+jac run cli -- add "Quiz prep" --course "EECS 482" --due 2026-10-07 --time 09:30 --minutes 90 --location "Duderstadt Library"
+jac run cli -- done BLOCK_ID          # check off one block (ids are shown by `today`)
+jac run cli -- task-done TASK_ID      # mark a whole task done, or reopen it
 jac run cli -- block "Sleep" --category sleep --start 23:00 --end 08:00 --repeat daily
-jac run cli -- block "EECS 482 lecture" --category class --start 10:30 --end 12:00 --repeat mon,wed,fri
+jac run cli -- block "EECS 482 lecture" --category class --start 10:30 --end 12:00 --repeat mon,wed,fri --location "1670 Beyster"
 jac run cli -- routine
-jac run cli -- replan
+jac run cli -- replan                 # Reschedule
 ```
 
-Use `jac run cli -- --help` or `jac run cli -- COMMAND --help` for complete command help.
+`jac run cli -- --help` and `jac run cli -- COMMAND --help` list every option. If the server is not reachable, the CLI says so and shows how to set `JAC_APP_PLANNER_URL`.
 
-## Run the Mobile app
+## Run the mobile app
 
-First keep the Web/server process running. For the fastest mobile-interface check, run its browser target:
+The mobile app's dev server starts its own copy of the planner API, which uses the same saved data as the web app.
+
+**Run it on its own.** The web and mobile dev servers share Jac's build folder, so stop `jac run` first and start it again afterwards.
+
+Browser preview of the mobile app (fastest):
 
 ```bash
-JAC_APP_PLANNER_URL=http://localhost:8002/api/planner \
-  jac run --dev --platform web mobile
+jac run --dev --platform web mobile
 ```
 
-For a native Expo target:
+Native app on a simulator or phone (Expo):
 
 ```bash
 jac setup mobile
-JAC_APP_PLANNER_URL=http://YOUR_LAN_IP:8002/api/planner jac run --dev mobile
+jac run --dev mobile
 ```
 
-Use the computer’s LAN IP rather than `localhost` when a physical phone needs to reach the server. Follow the QR-code or simulator instructions printed by Expo.
+Follow the QR-code or simulator instructions that Expo prints. A physical phone must be on the same network as the computer.
 
 ## Scheduling behavior
 
-When a task is added or edited, StudyFlow:
+StudyFlow keeps a **stable plan**: blocks only move when you ask them to.
 
-1. calculates remaining minutes after completed study sessions;
-2. orders active work by deadline and then priority;
-3. calculates free intervals inside the configured daily planning window;
-4. subtracts recurring sleep, meal, class, exercise, commute, or custom blocks;
-5. distributes work from today through each deadline in sessions of at most 90 minutes;
-6. preserves completed sessions during replanning; and
-7. reports any work that cannot fit before its deadline.
+| Action | What happens to the plan |
+|---|---|
+| Add a task | Its work is placed into free time between now and the deadline. Existing blocks stay put. |
+| Edit a task | Only that task's unfinished blocks are planned again. |
+| Check a block | Only that block is marked done (its minutes count toward the task). Nothing else moves, and the calendar hides it. |
+| Uncheck a block | The block returns to its original spot. If that spot has been taken since, it moves to the next free time instead of overlapping. |
+| **Done** on a task | The whole task is finished; its remaining blocks are removed and never come back. **Reopen** plans the rest again (or asks how much more time you need). |
+| Add reserved time | Only blocks that overlap it are moved. Reserved times may not overlap each other. |
+| Remove reserved time | Nothing moves; the status card suggests a Reschedule to use the freed time. |
+| **Reschedule** | Every unfinished block is cleared and all remaining work is placed again from now on. A block in progress right now stays. Moved blocks show "Rescheduled from …". |
 
-The algorithm is deterministic: the same task state and preferences produce the same remaining schedule.
+When placing work, the scheduler:
+
+1. uses any time of day that is not reserved, starting from the current time;
+2. orders tasks by deadline (date, then due time) and then priority;
+3. spreads each task across the days before its deadline and finishes before its due time;
+4. keeps one task in as few blocks as possible (at least 30 minutes each when the work allows); and
+5. reports any work that cannot fit before its deadline.
+
+The algorithm is deterministic: the same task state produces the same plan.
 
 ## Demo workflow
 
-1. Start the app with `jac run`.
-2. Click **Load demo week** on the empty Web dashboard.
-3. Click **Use example** under **Protected time**, then inspect how sessions move around the routine.
-4. Inspect the generated sessions and seven-day workload chart.
-5. Run `jac run cli -- today` with `JAC_APP_PLANNER_URL` configured and confirm the same sessions appear.
-6. Complete a session from Mobile or CLI.
-7. Refresh the Web dashboard and observe updated task progress.
-8. Click **Replan my week** and verify that completed work stays fixed while remaining work is redistributed.
+1. `jac run`, open the web URL, click **Load demo tasks** and **Use a typical student routine**.
+2. Look at the Week calendar: work sits between classes, lunch, and sleep, colored by course.
+3. `jac run cli -- add "Reading" --due <date> --minutes 60` (with `JAC_APP_PLANNER_URL` set) and refresh the web page: the new task is planned without moving anything else.
+4. Check off today's first block early. The status card says **Free time opened up**. Press **Reschedule** and later work moves up, each moved block saying where it came from.
+5. Run `jac run cli -- today` to see the same plan in the terminal.
 
 ## Validation
 
-Type-check all four apps:
-
 ```bash
-jac check
+jac check     # type-check the server, web, mobile, and CLI apps
+jac test      # run the scheduler, validation, and error-message tests
 ```
-
-Run the scheduler and validation tests:
-
-```bash
-jac test core/planner_service.jac -v
-```
-
-The test suite covers priority ordering, duration/time formatting, task-to-session scheduling, and invalid estimate rejection.
 
 ## Project layout
 
 ```text
-core/planner_service.jac   shared data model, API, persistence, scheduler, tests
-web/main.jac               browser planning center
-web/styles.css             responsive visual design
-mobile/main.jac            native MobUI execution interface
+core/planner_service.jac   data model, API, scheduler, calendar layout, tests
+core/errors.jac            readable error messages shared by web, mobile, and CLI (+ errors.test.jac)
+web/main.jac               web planning interface
+web/styles.css             web styles
+mobile/main.jac            mobile app (@jac/mobui)
 cli/main.jac               terminal commands
 jac.toml                   four-app workspace configuration
-legacy/                    unused reference routes from the original learning scaffold
+docs/                      screenshot used above
 ```
 
 ## Notes
 
-- The service uses public endpoints so all three interfaces intentionally share one guest planning graph for this individual-project demo.
-- Dates use ISO `YYYY-MM-DD` format.
-- The `legacy/` and unused `core/` reference modules remain for learning context but are excluded from StudyFlow’s checks and bundle.
+- The service uses public endpoints, so all interfaces share one planner graph. This fits a single-user personal planner.
+- Dates use `YYYY-MM-DD`; times use 24-hour `HH:MM`.

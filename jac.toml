@@ -35,30 +35,7 @@ directories = ["core"]
 # Jac 0.37.23 emits these false positives for intrinsic JSX tags, StyleSheet
 # object keys, and compiler-generated reactive setters. Real errors remain on.
 suppress = ["W1051", "W2001", "W2003"]
-exclude = [
-    "web/pages/*",
-    "desktop/*",
-    "core/site/*",
-    "core/jacyac/*",
-    "core/docs/*",
-    "core/source/*",
-    "core/leaderboard/*",
-    "core/brand/*",
-    "core/impl/*",
-    "core/ai.jac",
-    "core/async_utils.jac",
-    "core/github.jac",
-    "core/github_contracts.jac",
-    "core/install.jac",
-    "core/jac_tokenizer.jac",
-    "core/progress.jac",
-    "core/scoring_service.jac",
-    "core/social_graph.jac",
-    "core/timefmt.jac",
-    "core/utils.jac",
-    "cli/commands/*",
-    "cli/*.test.jac"
-]
+
 [check.lint]
 select = ["all"]
 
@@ -66,4 +43,4 @@ select = ["all"]
 [client.app_meta_data]
 title = "StudyFlow — Smart Student Planner"
 description = "Turn deadlines and estimated work into a realistic daily study plan."
-theme_color = "#0f766e"
+theme_color = "#4f46e5"

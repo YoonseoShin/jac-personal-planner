@@ -7,6 +7,7 @@ import from "@jac/mobui" {
     TextInput,
     View
 }
+import from core.errors { friendly_error }
 import from core.planner_service {
     DashboardData,
     ReservedBlockView,
@@ -20,14 +21,15 @@ import from core.planner_service {
     replan,
     seed_demo,
     seed_routine,
-    toggle_task
+    toggle_task,
+    uncomplete_session
 }
 
 glob styles = StyleSheet.create({
     screen: {flex: 1, backgroundColor: "#f6f6f7"},
     body: {padding: 20, paddingBottom: 56, gap: 18},
     header: {paddingTop: 22, gap: 4},
-    eyebrow: {fontSize: 11, letterSpacing: 2, color: "#2563eb", fontWeight: "800"},
+    eyebrow: {fontSize: 11, letterSpacing: 2, color: "#4f46e5", fontWeight: "800"},
     title: {fontSize: 32, lineHeight: 38, color: "#18181b", fontWeight: "800"},
     subtitle: {fontSize: 14, color: "#71717a"},
     summary: {flexDirection: "row", gap: 10},
@@ -49,10 +51,10 @@ glob styles = StyleSheet.create({
     sessionCopy: {flex: 1, gap: 3},
     sessionTitle: {fontSize: 14, color: "#18181b", fontWeight: "700"},
     doneButton: {paddingHorizontal: 11, paddingVertical: 8, borderRadius: 9, backgroundColor: "#f4f4f5"},
-    doneButtonText: {fontSize: 11, color: "#2563eb", fontWeight: "800"},
+    doneButtonText: {fontSize: 11, color: "#4f46e5", fontWeight: "800"},
     task: {flexDirection: "row", gap: 12, alignItems: "center", paddingVertical: 10, borderTopWidth: 1, borderTopColor: "#f1f1f2"},
     checkbox: {width: 25, height: 25, borderWidth: 2, borderColor: "#d4d4d8", borderRadius: 7, alignItems: "center", justifyContent: "center"},
-    checkboxDone: {backgroundColor: "#2563eb", borderColor: "#2563eb"},
+    checkboxDone: {backgroundColor: "#4f46e5", borderColor: "#4f46e5"},
     checkmark: {color: "#ffffff", fontWeight: "800"},
     taskCopy: {flex: 1, gap: 3},
     taskTitle: {fontSize: 14, color: "#18181b", fontWeight: "700"},
@@ -61,7 +63,7 @@ glob styles = StyleSheet.create({
     input: {backgroundColor: "#ffffff", color: "#18181b", borderWidth: 1, borderColor: "#d4d4d8", borderRadius: 9, paddingHorizontal: 12, paddingVertical: 11},
     row: {flexDirection: "row", gap: 10},
     half: {flex: 1},
-    primary: {backgroundColor: "#2563eb", borderRadius: 10, padding: 13, alignItems: "center"},
+    primary: {backgroundColor: "#4f46e5", borderRadius: 10, padding: 13, alignItems: "center"},
     primaryText: {color: "#ffffff", fontWeight: "800"},
     secondary: {backgroundColor: "#f4f4f5", borderRadius: 10, padding: 11, alignItems: "center", borderWidth: 1, borderColor: "#e4e4e7"},
     secondaryText: {color: "#27272a", fontWeight: "800"},
@@ -77,7 +79,18 @@ glob styles = StyleSheet.create({
     blockCopy: {flex: 1, gap: 2},
     blockTitle: {fontSize: 13, color: "#18181b", fontWeight: "700"},
     removeText: {fontSize: 12, color: "#dc2626", fontWeight: "700"},
-    helper: {fontSize: 12, lineHeight: 18, color: "#71717a"}
+    helper: {fontSize: 12, lineHeight: 18, color: "#71717a"},
+    status: {flexDirection: "row", alignItems: "center", gap: 12, borderRadius: 14, padding: 14, borderWidth: 1},
+    statusOk: {backgroundColor: "#ecfdf5", borderColor: "#bbf7d0"},
+    statusWarn: {backgroundColor: "#fffbeb", borderColor: "#fcd34d"},
+    statusHint: {backgroundColor: "#eef2ff", borderColor: "#c7d2fe"},
+    statusCopy: {flex: 1, gap: 2},
+    statusTitle: {fontSize: 14, color: "#18181b", fontWeight: "800"},
+    smallButton: {backgroundColor: "#4f46e5", borderRadius: 9, paddingHorizontal: 12, paddingVertical: 9},
+    smallButtonText: {color: "#ffffff", fontSize: 12, fontWeight: "800"},
+    todoCheck: {width: 26, height: 26, borderRadius: 13, borderWidth: 2, alignItems: "center", justifyContent: "center", backgroundColor: "#ffffff"},
+    moved: {fontSize: 11, color: "#4f46e5", fontWeight: "700"},
+    missed: {fontSize: 11, color: "#b45309", fontWeight: "800"}
 });
 
 def minute_text(total: int) -> str {
@@ -88,37 +101,70 @@ def minute_text(total: int) -> str {
     return f"{minute}m";
 }
 
-def MobileSession(session: SessionView, onDone: Callable[[str], None]) -> JsxElement {
+def MobileSession(
+    session: SessionView,
+    onToggle: Callable[[str, bool], None]
+) -> JsxElement {
     <View style={styles.session}>
-        <View style={styles.time}>
-            <Text style={styles.timeStrong}>{session.start_time}</Text>
-            <Text style={styles.muted}>{minute_text(session.duration)}</Text>
-        </View>
-        <View style={styles.sessionRule}/>
+        <Pressable
+            style={[styles.todoCheck, {"borderColor": session.color}, {"backgroundColor": session.color} if session.completed else {}]}
+            onPress={lambda { onToggle(session.id, session.completed); }}
+        >
+            <Text style={styles.checkmark}>{"✓" if session.completed else ""}</Text>
+        </Pressable>
         <View style={styles.sessionCopy}>
-            <Text style={styles.muted}>{session.course}</Text>
-            <Text style={styles.sessionTitle}>{session.title}</Text>
+            <Text style={styles.taskDone if session.completed else styles.sessionTitle}>{session.title}</Text>
+            <Text style={styles.muted}>
+                {session.course + " · " + session.start_time + " – " + session.end_time + " · " + minute_text(session.duration) + (" · 📍 " + session.location if session.location else "")}
+            </Text>
+            {if session.moved_from and not session.completed {
+                <Text style={styles.moved}>{"↪ Rescheduled from " + session.moved_from}</Text>
+            }}
+            {if session.added_note and not session.completed {
+                <Text style={styles.moved}>{"↪ " + session.added_note}</Text>
+            }}
         </View>
-        <Pressable style={styles.doneButton} disabled={session.completed} onPress={lambda { onDone(session.id); }}>
-            <Text style={styles.doneButtonText}>{"Done" if session.completed else "Finish"}</Text>
+        {if session.missed {
+            <Text style={styles.missed}>Missed</Text>
+        }}
+    </View>
+}
+
+def MobileTask(task: TaskView, onDone: Callable[[str], None]) -> JsxElement {
+    <View style={[styles.task, {"borderLeftWidth": 3, "borderLeftColor": task.color, "paddingLeft": 10}]}>
+        <View style={styles.taskCopy}>
+            <Text style={styles.taskTitle}>{task.title}</Text>
+            <Text style={styles.muted}>
+                {task.course + " · " + task.due_label + " · " + minute_text(task.completed_minutes) + " / " + minute_text(task.estimated_minutes) + " done" + (" · 📍 " + task.location if task.location else "")}
+            </Text>
+        </View>
+        <Pressable style={styles.doneButton} onPress={lambda { onDone(task.id); }}>
+            <Text style={styles.doneButtonText}>✓ Done</Text>
         </Pressable>
     </View>
 }
 
-def MobileTask(task: TaskView, onToggle: Callable[[str], None]) -> JsxElement {
-    <View style={styles.task}>
-        <Pressable
-            style={[styles.checkbox, styles.checkboxDone if task.completed else {}]}
-            onPress={lambda { onToggle(task.id); }}
-        >
-            <Text style={styles.checkmark}>{"✓" if task.completed else ""}</Text>
-        </Pressable>
-        <View style={styles.taskCopy}>
-            <Text style={styles.muted}>{task.course}{" · "}{task.due_label}</Text>
-            <Text style={styles.taskDone if task.completed else styles.taskTitle}>{task.title}</Text>
-        </View>
-        <Text style={styles.muted}>{str(task.progress)}%</Text>
-    </View>
+# Mirrors the web status card: what (if anything) Reschedule would fix.
+def status_of(data: DashboardData) -> tuple[str, str] {
+    if data.missed_sessions > 0 {
+        return ("warn", str(data.missed_sessions) + " missed to-do(s). Reschedule to move them.");
+    }
+    if data.overlapping > 0 {
+        return ("warn", str(data.overlapping) + " to-dos overlap. Reschedule to fix.");
+    }
+    if len([t for t in data.tasks if t.overdue]) > 0 {
+        return ("warn", "A task is past due. Finish it or edit its due date.");
+    }
+    if data.unfit_minutes > 0 {
+        return ("warn", minute_text(data.unfit_minutes) + " of work doesn't fit before its deadline.");
+    }
+    if data.overload_minutes > data.unfit_minutes {
+        return ("warn", minute_text(data.overload_minutes - data.unfit_minutes) + " of work isn't planned yet. Reschedule to plan it.");
+    }
+    if data.improvable_tasks > 0 {
+        return ("hint", "Free time opened up. Reschedule to finish earlier.");
+    }
+    return ("ok", "On track: your plan is up to date.");
 }
 
 def MobileBlock(block: ReservedBlockView, onDelete: Callable[[str], None]) -> JsxElement {
@@ -126,7 +172,7 @@ def MobileBlock(block: ReservedBlockView, onDelete: Callable[[str], None]) -> Js
         <View style={styles.blockDot}/>
         <View style={styles.blockCopy}>
             <Text style={styles.blockTitle}>{block.label}</Text>
-            <Text style={styles.muted}>{block.start_time}{" – "}{block.end_time}{" · "}{block.repeat_label or block.repeat_rule}</Text>
+            <Text style={styles.muted}>{block.start_time}{" – "}{block.end_time}{" · "}{block.repeat_label or block.repeat_rule}{" · 📍 " + block.location if block.location else ""}</Text>
         </View>
         <Pressable onPress={lambda { onDelete(block.id); }}>
             <Text style={styles.removeText}>Remove</Text>
@@ -143,49 +189,56 @@ def:pub app -> JsxElement {
         course: str = "",
         dueDate: str = "",
         estimate: str = "60",
+        dueTime: str = "",
+        place: str = "",
         blockLabel: str = "",
+        blockPlace: str = "",
         blockStart: str = "23:00",
         blockEnd: str = "08:00";
 
     async def loadData {
         try { loading = True; data = await get_dashboard(); error = ""; }
-        except Exception as e { error = "Planner server unavailable: " + str(e); }
+        except Exception as e { error = friendly_error(str(e)); }
         finally { loading = False; }
     }
 
-    async def finish(id: str) {
-        try { data = await complete_session(id); }
-        except Exception as e { error = str(e); }
+    async def toggleSession(id: str, done: bool) {
+        try {
+            if done { data = await uncomplete_session(id); }
+            else { data = await complete_session(id); }
+        } except Exception as e { error = friendly_error(str(e)); }
     }
 
     async def toggle(id: str) {
         try { data = await toggle_task(id); }
-        except Exception as e { error = str(e); }
+        except Exception as e { error = friendly_error(str(e)); }
     }
 
     async def quickAdd {
         if busy { return; }
         try {
             busy = True;
-            data = await add_task(title, course, dueDate, int(estimate), "medium");
+            data = await add_task(title, course, dueDate, int(estimate), "medium", dueTime, place);
             title = "";
             course = "";
             dueDate = "";
+            dueTime = "";
             estimate = "60";
+            place = "";
             error = "";
-        } except Exception as e { error = str(e); }
+        } except Exception as e { error = friendly_error(str(e)); }
         finally { busy = False; }
     }
 
     async def runReplan {
         try { busy = True; data = await replan(); }
-        except Exception as e { error = str(e); }
+        except Exception as e { error = friendly_error(str(e)); }
         finally { busy = False; }
     }
 
     async def loadDemo {
         try { data = await seed_demo(); }
-        except Exception as e { error = str(e); }
+        except Exception as e { error = friendly_error(str(e)); }
     }
 
     async def addBlock {
@@ -193,30 +246,31 @@ def:pub app -> JsxElement {
         try {
             busy = True;
             data = await add_reserved_block(
-                blockLabel, "other", blockStart, blockEnd, "daily"
+                blockLabel, "other", blockStart, blockEnd, "daily", blockPlace
             );
             blockLabel = "";
+            blockPlace = "";
             error = "";
-        } except Exception as e { error = str(e); }
+        } except Exception as e { error = friendly_error(str(e)); }
         finally { busy = False; }
     }
 
     async def removeBlock(id: str) {
         try { data = await delete_reserved_block(id); }
-        except Exception as e { error = str(e); }
+        except Exception as e { error = friendly_error(str(e)); }
     }
 
     async def loadRoutine {
         try { data = await seed_routine(); }
-        except Exception as e { error = str(e); }
+        except Exception as e { error = friendly_error(str(e)); }
     }
 
     async can with entry { await loadData(); }
 
     <ScrollView style={styles.screen} contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
         <View style={styles.header}>
-            <Text style={styles.eyebrow}>STUDYFLOW · TODAY</Text>
-            <Text style={styles.title}>Ready when you are.</Text>
+            <Text style={styles.eyebrow}>STUDYFLOW</Text>
+            <Text style={styles.title}>Today</Text>
             <Text style={styles.subtitle}>{data.today if data is not None else "Loading your plan…"}</Text>
         </View>
 
@@ -228,63 +282,70 @@ def:pub app -> JsxElement {
         }}
 
         {if loading {
-            <ActivityIndicator size="large" color="#2563eb"/>
+            <ActivityIndicator size="large" color="#4f46e5"/>
         } elif data is not None {
-            <View style={styles.summary}>
-                <View style={styles.stat}>
-                    <Text style={styles.statLabel}>TODAY</Text>
-                    <Text style={styles.statValue}>{minute_text(sum([s.duration for s in data.today_sessions]))}</Text>
+            <View style={[
+                styles.status,
+                styles.statusWarn if status_of(data)[0] == "warn" else (styles.statusHint if status_of(data)[0] == "hint" else styles.statusOk)
+            ]}>
+                <View style={styles.statusCopy}>
+                    <Text style={styles.statusTitle}>{status_of(data)[1]}</Text>
+                    <Text style={styles.muted}>{minute_text(data.remaining_minutes) + " of work left · " + str(data.active_tasks) + " open tasks"}</Text>
                 </View>
-                <View style={[styles.stat, styles.statAlt]}>
-                    <Text style={styles.statLabelDark}>REMAINING</Text>
-                    <Text style={styles.statValueDark}>{minute_text(data.remaining_minutes)}</Text>
-                </View>
-            </View>
-
-            <View style={styles.panel}>
-                <View style={styles.panelHeading}>
-                    <Text style={styles.panelTitle}>Today’s sessions</Text>
-                    <Text style={styles.badge}>{str(len(data.today_sessions))} blocks</Text>
-                </View>
-                {if len(data.today_sessions) == 0 {
-                    <View style={styles.empty}>
-                        <Text style={styles.emptyTitle}>Nothing scheduled yet</Text>
-                        <Text style={styles.emptyText}>Add an assignment or load the demo week to see the planner work.</Text>
-                        <Pressable style={styles.secondary} onPress={loadDemo}>
-                            <Text style={styles.secondaryText}>Load demo week</Text>
-                        </Pressable>
-                    </View>
-                } else {
-                    for session in data.today_sessions {
-                        <MobileSession key={session.id} session={session} onDone={finish}/>
-                    }
-                }}
-                <Pressable style={styles.secondary} disabled={busy} onPress={runReplan}>
-                    <Text style={styles.secondaryText}>↻ Replan remaining work</Text>
+                <Pressable style={styles.smallButton} disabled={busy} onPress={runReplan}>
+                    <Text style={styles.smallButtonText}>{"…" if busy else "↻ Reschedule"}</Text>
                 </Pressable>
             </View>
 
             <View style={styles.panel}>
                 <View style={styles.panelHeading}>
-                    <Text style={styles.panelTitle}>Assignments</Text>
-                    <Text style={styles.badge}>{str(data.active_tasks)} active</Text>
+                    <Text style={styles.panelTitle}>To-do</Text>
+                    <Text style={styles.badge}>{str(len([x for x in data.today_sessions if x.completed])) + " of " + str(len(data.today_sessions)) + " done"}</Text>
                 </View>
+                <Text style={styles.helper}>Tap the circle to check a block off (tap again to undo). Your plan only shifts when you press Reschedule.</Text>
+                {if len(data.today_sessions) == 0 {
+                    <View style={styles.empty}>
+                        <Text style={styles.emptyTitle}>Nothing planned for today</Text>
+                        <Text style={styles.emptyText}>Add a task below or load the demo to see the planner work.</Text>
+                        <Pressable style={styles.secondary} onPress={loadDemo}>
+                            <Text style={styles.secondaryText}>Load demo tasks</Text>
+                        </Pressable>
+                    </View>
+                } else {
+                    for session in data.today_sessions {
+                        <MobileSession key={session.id} session={session} onToggle={toggleSession}/>
+                    }
+                }}
+            </View>
+
+            <View style={styles.panel}>
+                <View style={styles.panelHeading}>
+                    <Text style={styles.panelTitle}>Tasks</Text>
+                    <Text style={styles.badge}>{str(data.active_tasks)} open</Text>
+                </View>
+                <Text style={styles.helper}>Press Done when a whole task is finished; its remaining blocks are removed.</Text>
                 {for task in data.tasks {
-                    <MobileTask key={task.id} task={task} onToggle={toggle}/>
+                    if not task.completed {
+                        <MobileTask key={task.id} task={task} onDone={toggle}/>
+                    }
                 }}
             </View>
 
             <View style={styles.panel}>
                 <Text style={styles.panelTitle}>Quick add</Text>
                 <View style={styles.form}>
-                    <TextInput style={styles.input} value={title} placeholder="Assignment title" placeholderTextColor="#81908c" onChangeText={lambda (value: str) { title = value; }}/>
-                    <TextInput style={styles.input} value={course} placeholder="Course" placeholderTextColor="#81908c" onChangeText={lambda (value: str) { course = value; }}/>
+                    <TextInput style={styles.input} value={title} placeholder="What do you need to do?" placeholderTextColor="#81908c" onChangeText={lambda (value: str) { title = value; }}/>
                     <View style={styles.row}>
-                        <TextInput style={[styles.input, styles.half]} value={dueDate} placeholder="YYYY-MM-DD" placeholderTextColor="#81908c" autoCapitalize="none" onChangeText={lambda (value: str) { dueDate = value; }}/>
-                        <TextInput style={[styles.input, styles.half]} value={estimate} placeholder="Minutes" placeholderTextColor="#81908c" keyboardType="number-pad" onChangeText={lambda (value: str) { estimate = value; }}/>
+                        <TextInput style={[styles.input, styles.half]} value={course} placeholder="Course" placeholderTextColor="#81908c" onChangeText={lambda (value: str) { course = value; }}/>
+                        <TextInput style={[styles.input, styles.half]} value={place} placeholder="Location (optional)" placeholderTextColor="#81908c" onChangeText={lambda (value: str) { place = value; }}/>
                     </View>
+                    <View style={styles.row}>
+                        <TextInput style={[styles.input, styles.half]} value={dueDate} placeholder="Due YYYY-MM-DD" placeholderTextColor="#81908c" autoCapitalize="none" onChangeText={lambda (value: str) { dueDate = value; }}/>
+                        <TextInput style={[styles.input, styles.half]} value={dueTime} placeholder="Time HH:MM (optional)" placeholderTextColor="#81908c" autoCapitalize="none" onChangeText={lambda (value: str) { dueTime = value; }}/>
+                    </View>
+                    <TextInput style={styles.input} value={estimate} placeholder="Estimated minutes" placeholderTextColor="#81908c" keyboardType="number-pad" onChangeText={lambda (value: str) { estimate = value; }}/>
                     <Pressable style={styles.primary} disabled={busy} onPress={quickAdd}>
-                        <Text style={styles.primaryText}>{"Adding…" if busy else "+ Add and schedule"}</Text>
+                        <Text style={styles.primaryText}>{"Adding…" if busy else "+ Add & schedule"}</Text>
                     </Pressable>
                 </View>
             </View>
@@ -306,12 +367,13 @@ def:pub app -> JsxElement {
                 }}
                 <View style={styles.form}>
                     <TextInput style={styles.input} value={blockLabel} placeholder="Name, e.g. Sleep" placeholderTextColor="#a1a1aa" onChangeText={lambda (value: str) { blockLabel = value; }}/>
+                    <TextInput style={styles.input} value={blockPlace} placeholder="Location (optional)" placeholderTextColor="#a1a1aa" onChangeText={lambda (value: str) { blockPlace = value; }}/>
                     <View style={styles.row}>
                         <TextInput style={[styles.input, styles.half]} value={blockStart} placeholder="23:00" placeholderTextColor="#a1a1aa" autoCapitalize="none" onChangeText={lambda (value: str) { blockStart = value; }}/>
                         <TextInput style={[styles.input, styles.half]} value={blockEnd} placeholder="08:00" placeholderTextColor="#a1a1aa" autoCapitalize="none" onChangeText={lambda (value: str) { blockEnd = value; }}/>
                     </View>
                     <Pressable style={styles.primary} disabled={busy} onPress={addBlock}>
-                        <Text style={styles.primaryText}>Protect every day</Text>
+                        <Text style={styles.primaryText}>Add reserved time (every day)</Text>
                     </Pressable>
                 </View>
             </View>
