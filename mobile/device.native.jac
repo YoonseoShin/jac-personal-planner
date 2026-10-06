@@ -1,4 +1,4 @@
-import from 'react-native' { AppState, RefreshControl }
+import from 'react-native' { Alert, AppState, RefreshControl }
 
 # True while the app is on screen.
 def:pub is_foreground -> bool {
@@ -17,4 +17,9 @@ def:pub watch_foreground(onActive: Callable[[], None]) -> Callable[[], None] {
 # Pull-to-refresh control for a ScrollView.
 def:pub PullToRefresh(refreshing: bool, onRefresh: Callable[[], None]) -> JsxElement | None {
     return <RefreshControl refreshing={refreshing} onRefresh={onRefresh}/>;
+}
+
+# Shows a message in the system dialog box with an OK button.
+def:pub show_alert(title: str, message: str) {
+    Alert.alert(title, message, [{"text": "OK"}]);
 }

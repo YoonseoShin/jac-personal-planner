@@ -53,7 +53,7 @@ def parser -> argparse.ArgumentParser {
     );
 
     done = commands.add_parser("done", help="complete a work block by id");
-    done.add_argument("item_id", help="session id shown by `today`");
+    done.add_argument("item_id", help="block id shown by `today`");
     task_done = commands.add_parser("task-done", help="mark a whole task done (or reopen it) by id");
     task_done.add_argument("item_id", help="task id shown by `list`");
 

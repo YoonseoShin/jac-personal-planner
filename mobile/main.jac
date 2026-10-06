@@ -2,6 +2,7 @@ import from "@jac/mobui" {
     ActivityIndicator,
     Keyboard,
     KeyboardAvoidingView,
+    Modal,
     Platform,
     Pressable,
     ScrollView,
@@ -10,15 +11,16 @@ import from "@jac/mobui" {
     TextInput,
     View
 }
-import from core.errors { friendly_error }
+import from core.errors { MSG_UNREACHABLE, friendly_error }
 import from mobile.api_base { api_base_url, configure_api_base }
 import from "react" { useEffect }
-import from mobile.device { PullToRefresh, is_foreground, watch_foreground }
+import from mobile.device { PullToRefresh, is_foreground, show_alert, watch_foreground }
 
 # How often an open app re-reads the plan, so changes made on the web or in
 # the CLI show up without reopening the app.
 glob REFRESH_MS: int = 10000;
 import from core.planner_service {
+    CalendarData,
     DashboardData,
     ReservedBlockView,
     SessionView,
@@ -27,6 +29,7 @@ import from core.planner_service {
     add_task,
     complete_session,
     delete_reserved_block,
+    get_calendar,
     get_dashboard,
     replan,
     seed_demo,
@@ -72,7 +75,7 @@ glob styles = StyleSheet.create({
     form: {gap: 10},
     input: {backgroundColor: "#ffffff", color: "#18181b", borderWidth: 1, borderColor: "#d4d4d8", borderRadius: 9, paddingHorizontal: 12, paddingVertical: 11},
     row: {flexDirection: "row", gap: 10},
-    half: {flex: 1},
+    half: {flex: 1, minWidth: 0, flexBasis: 0},
     primary: {backgroundColor: "#4f46e5", borderRadius: 10, padding: 13, alignItems: "center"},
     primaryText: {color: "#ffffff", fontWeight: "800"},
     secondary: {backgroundColor: "#f4f4f5", borderRadius: 10, padding: 11, alignItems: "center", borderWidth: 1, borderColor: "#e4e4e7"},
@@ -80,8 +83,6 @@ glob styles = StyleSheet.create({
     empty: {paddingVertical: 28, alignItems: "center", gap: 8},
     emptyTitle: {fontSize: 17, color: "#18181b", fontWeight: "800"},
     emptyText: {fontSize: 13, lineHeight: 19, color: "#71717a", textAlign: "center"},
-    error: {backgroundColor: "#fff0ed", borderRadius: 11, padding: 13},
-    errorText: {color: "#a83f32", fontSize: 12},
     notice: {backgroundColor: "#eff6ff", borderRadius: 11, padding: 13},
     noticeText: {color: "#1d4ed8", fontSize: 12},
     block: {flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10, borderTopWidth: 1, borderTopColor: "#f1f1f2"},
@@ -91,6 +92,37 @@ glob styles = StyleSheet.create({
     removeText: {fontSize: 12, color: "#dc2626", fontWeight: "700"},
     helper: {fontSize: 12, lineHeight: 18, color: "#71717a"},
     tapArea: {gap: 18},
+    headerRow: {flexDirection: "row", alignItems: "center", justifyContent: "space-between"},
+    addButton: {width: 44, height: 44, borderRadius: 22, backgroundColor: "#4f46e5", alignItems: "center", justifyContent: "center"},
+    addButtonText: {color: "#ffffff", fontSize: 26, fontWeight: "700", lineHeight: 28},
+    backdrop: {flex: 1, backgroundColor: "rgba(17,24,39,0.45)", justifyContent: "flex-end"},
+    sheet: {backgroundColor: "#ffffff", borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, paddingBottom: 34, gap: 12, maxHeight: "92%"},
+    sheetHead: {flexDirection: "row", justifyContent: "space-between", alignItems: "center"},
+    closeText: {fontSize: 22, color: "#9ca3af"},
+    fieldLabel: {fontSize: 12, color: "#374151", fontWeight: "700"},
+    calHead: {flexDirection: "row", alignItems: "center", justifyContent: "space-between"},
+    calNav: {fontSize: 22, color: "#4f46e5", paddingHorizontal: 12},
+    calTitle: {fontSize: 14, fontWeight: "800", color: "#111827"},
+    calWeek: {flexDirection: "row"},
+    calWeekday: {flex: 1, textAlign: "center", fontSize: 11, color: "#9ca3af", fontWeight: "700"},
+    calDay: {width: "14.28%", height: 38, alignItems: "center", justifyContent: "center", borderRadius: 19},
+    calDaySelected: {backgroundColor: "#4f46e5"},
+    calDayToday: {borderWidth: 1.5, borderColor: "#4f46e5"},
+    calDayText: {fontSize: 14, color: "#111827", fontWeight: "600"},
+    calDayTextMuted: {color: "#d1d5db"},
+    calDayTextSelected: {color: "#ffffff"},
+    calGrid: {flexDirection: "row", flexWrap: "wrap"},
+    timeFieldOpen: {borderColor: "#4f46e5"},
+    timeValue: {fontSize: 15, color: "#111827", fontWeight: "600"},
+    timePlaceholder: {fontSize: 15, color: "#9ca3af"},
+    timeChip: {minWidth: 46, paddingVertical: 8, paddingHorizontal: 10, borderRadius: 8, borderWidth: 1, borderColor: "#e5e7eb", alignItems: "center", backgroundColor: "#ffffff"},
+    timeChipOn: {backgroundColor: "#4f46e5", borderColor: "#4f46e5"},
+    timeChipText: {fontSize: 14, color: "#111827", fontWeight: "600"},
+    timeChipTextOn: {color: "#ffffff"},
+    dropField: {flex: 1, minWidth: 0, borderWidth: 1, borderColor: "#d4d4d8", borderRadius: 9, paddingHorizontal: 12, paddingVertical: 11, flexDirection: "row", justifyContent: "space-between", alignItems: "center"},
+    dropList: {maxHeight: 200, borderWidth: 1, borderColor: "#e5e7eb", borderRadius: 9},
+    dropOption: {paddingVertical: 11, paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: "#f3f4f6"},
+    dropOptionOn: {backgroundColor: "#4f46e5"},
     status: {flexDirection: "row", alignItems: "center", gap: 12, borderRadius: 14, padding: 14, borderWidth: 1},
     statusOk: {backgroundColor: "#ecfdf5", borderColor: "#bbf7d0"},
     statusWarn: {backgroundColor: "#fffbeb", borderColor: "#fcd34d"},
@@ -191,11 +223,128 @@ def MobileBlock(block: ReservedBlockView, onDelete: Callable[[str], None]) -> Js
     </View>
 }
 
+# "HH:MM" (24h) -> "9:30 AM"; "" stays "".
+def time_label(value: str) -> str {
+    if not value { return ""; }
+    parts = value.split(":");
+    hour = int(parts[0]);
+    shown = hour % 12;
+    if shown == 0 { shown = 12; }
+    return str(shown) + ":" + parts[1] + (" AM" if hour < 12 else " PM");
+}
+
+# Builds "HH:MM" from a 12-hour clock, minutes, and AM/PM.
+def to_clock(hour12: int, minute: int, pm: bool) -> str {
+    hour = hour12 % 12 + (12 if pm else 0);
+    return ("0" if hour < 10 else "") + str(hour) + ":" + ("0" if minute < 10 else "") + str(minute);
+}
+
+glob HOURS: list[str] = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"],
+     MINUTES: list[str] = ["00", "05", "10", "15", "20", "25", "30", "35", "40", "45", "50", "55"],
+     HALVES: list[str] = ["AM", "PM"];
+
+# One dropdown field: shows the current choice; tapping it opens or closes its
+# option list (drawn by TimePicker under the row of fields).
+def DropdownField(text: str, open: bool, onToggle: Callable[[], None]) -> JsxElement {
+    return <Pressable style={[styles.dropField, styles.timeFieldOpen if open else {}]} onPress={lambda { Keyboard.dismiss(); onToggle(); }}>
+        <Text style={styles.timeValue if text != "--" else styles.timePlaceholder}>{text}</Text>
+        <Text style={styles.muted}>{"▴" if open else "▾"}</Text>
+    </Pressable>;
+}
+
+# Time picker made of three dropdowns: hour, minute (5-minute steps, like the
+# web app) and AM/PM. `openKey` says which list is open ("<id>-h", "-m", "-ap").
+def TimePicker(
+    id: str,
+    value: str,
+    optional: bool,
+    openKey: str,
+    onOpen: Callable[[str], None],
+    onChange: Callable[[str], None]
+) -> JsxElement {
+    hour = int(value.split(":")[0]) if value else -1;
+    minute = int(value.split(":")[1]) if value else 0;
+    pm = hour >= 12;
+    hour12 = hour % 12 if hour >= 0 else 0;
+    if hour >= 0 and hour12 == 0 { hour12 = 12; }
+    minute_text = ("0" if minute < 10 else "") + str(minute);
+    def pick(kind: str, choice: str) {
+        h = hour12 if hour12 > 0 else 9;
+        m = minute;
+        half_pm = pm if hour >= 0 else False;
+        if kind == "h" { h = int(choice); }
+        if kind == "m" { m = int(choice); }
+        if kind == "ap" { half_pm = choice == "PM"; }
+        onChange(to_clock(h, m, half_pm));
+        onOpen("");
+    }
+    def toggle(kind: str) {
+        onOpen("" if openKey == id + "-" + kind else id + "-" + kind);
+    }
+    open_kind = openKey[len(id) + 1:] if openKey.startswith(id + "-") else "";
+    choices = HOURS if open_kind == "h" else (MINUTES if open_kind == "m" else HALVES);
+    current = str(hour12) if open_kind == "h" else (minute_text if open_kind == "m" else ("PM" if pm else "AM"));
+    return <View style={{"gap": 6}}>
+        <View style={styles.row}>
+            <DropdownField text={str(hour12) if value else "--"} open={open_kind == "h"} onToggle={lambda { toggle("h"); }}/>
+            <DropdownField text={minute_text if value else "--"} open={open_kind == "m"} onToggle={lambda { toggle("m"); }}/>
+            <DropdownField text={("PM" if pm else "AM") if value else "--"} open={open_kind == "ap"} onToggle={lambda { toggle("ap"); }}/>
+        </View>
+        {if open_kind {
+            <ScrollView style={styles.dropList} nestedScrollEnabled={True} keyboardShouldPersistTaps="handled">
+                {[<Pressable key={c} style={[styles.dropOption, styles.dropOptionOn if value and c == current else {}]} onPress={lambda { pick(open_kind, c); }}>
+                    <Text style={[styles.timeChipText, styles.timeChipTextOn if value and c == current else {}]}>{c}</Text>
+                </Pressable> for c in choices]}
+            </ScrollView>
+        }}
+        {if optional and value {
+            <Pressable style={[styles.timeChip, {"alignSelf": "flex-start"}]} onPress={lambda { onChange(""); onOpen(""); }}>
+                <Text style={styles.timeChipText}>No time</Text>
+            </Pressable>
+        }}
+    </View>;
+}
+
+# Month calendar for picking a due date. Days come from the server's month
+# view, so the phone needs no date math; past days cannot be picked.
+def MonthPicker(
+    cal: CalendarData | None,
+    selected: str,
+    onPick: Callable[[str], None],
+    onShift: Callable[[int], None]
+) -> JsxElement {
+    if cal is None {
+        return <ActivityIndicator color="#4f46e5"/>;
+    }
+    return <View style={{"gap": 6}}>
+        <View style={styles.calHead}>
+            <Pressable onPress={lambda { onShift(-1); }}><Text style={styles.calNav}>‹</Text></Pressable>
+            <Text style={styles.calTitle}>{cal.title}</Text>
+            <Pressable onPress={lambda { onShift(1); }}><Text style={styles.calNav}>›</Text></Pressable>
+        </View>
+        <View style={styles.calWeek}>
+            {[<Text key={w} style={styles.calWeekday}>{w[0]}</Text> for w in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]]}
+        </View>
+        <View style={styles.calGrid}>
+            {[<Pressable
+                key={d.date}
+                disabled={d.is_past}
+                onPress={lambda { onPick(d.date); }}
+                style={[styles.calDay, styles.calDaySelected if d.date == selected else (styles.calDayToday if d.is_today else {})]}
+            >
+                <Text style={[
+                    styles.calDayText,
+                    styles.calDayTextSelected if d.date == selected else (styles.calDayTextMuted if d.is_past or not d.in_range else {})
+                ]}>{str(d.day_num)}</Text>
+            </Pressable> for d in cal.days]}
+        </View>
+    </View>;
+}
+
 def:pub app -> JsxElement {
     has data: DashboardData | None = None,
         loading: bool = True,
         busy: bool = False,
-        error: str = "",
         title: str = "",
         course: str = "",
         dueDate: str = "",
@@ -207,14 +356,28 @@ def:pub app -> JsxElement {
         blockStart: str = "23:00",
         blockEnd: str = "08:00",
         refreshing: bool = False,
+        showAdd: bool = False,
+        openTime: str = "",
+        pickerCal: CalendarData | None = None,
         tick: int = 0,
         pollRef: Ref[int] = Ref(0);
 
+    # Problems are shown in a dialog box. Connection problems also say which
+    # server address the app tried.
+    def showError(e: Exception) {
+        message = friendly_error(str(e));
+        if message == MSG_UNREACHABLE {
+            show_alert("Can't connect", message + chr(10) + chr(10) + "Server: " + (api_base_url() or "not set"));
+        } else {
+            show_alert("Couldn't do that", message);
+        }
+    }
+
     async def loadData {
-        try { loading = True; data = await get_dashboard(); error = ""; }
+        try { loading = True; data = await get_dashboard(); }
         except Exception as e {
             console.warn("[studyflow] load failed: " + str(e));
-            error = friendly_error(str(e));
+            showError(e);
         }
         finally { loading = False; }
     }
@@ -223,12 +386,27 @@ def:pub app -> JsxElement {
         try {
             if done { data = await uncomplete_session(id); }
             else { data = await complete_session(id); }
-        } except Exception as e { error = friendly_error(str(e)); }
+        } except Exception as e { showError(e); }
     }
 
     async def toggle(id: str) {
         try { data = await toggle_task(id); }
-        except Exception as e { error = friendly_error(str(e)); }
+        except Exception as e { showError(e); }
+    }
+
+    async def loadPicker(anchor: str, shift: int) {
+        try { pickerCal = await get_calendar("month", anchor, shift); }
+        except Exception as e { showError(e); }
+    }
+
+    async def openAdd {
+        showAdd = True;
+        await loadPicker(dueDate, 0);
+    }
+
+    def closeAdd {
+        Keyboard.dismiss();
+        showAdd = False;
     }
 
     async def quickAdd {
@@ -243,20 +421,21 @@ def:pub app -> JsxElement {
             dueTime = "";
             estimate = "60";
             place = "";
-            error = "";
-        } except Exception as e { error = friendly_error(str(e)); }
+            showAdd = False;
+            openTime = "";
+        } except Exception as e { showError(e); }
         finally { busy = False; }
     }
 
     async def runReplan {
         try { busy = True; data = await replan(); }
-        except Exception as e { error = friendly_error(str(e)); }
+        except Exception as e { showError(e); }
         finally { busy = False; }
     }
 
     async def loadDemo {
         try { data = await seed_demo(); }
-        except Exception as e { error = friendly_error(str(e)); }
+        except Exception as e { showError(e); }
     }
 
     async def addBlock {
@@ -269,19 +448,18 @@ def:pub app -> JsxElement {
             );
             blockLabel = "";
             blockPlace = "";
-            error = "";
-        } except Exception as e { error = friendly_error(str(e)); }
+        } except Exception as e { showError(e); }
         finally { busy = False; }
     }
 
     async def removeBlock(id: str) {
         try { data = await delete_reserved_block(id); }
-        except Exception as e { error = friendly_error(str(e)); }
+        except Exception as e { showError(e); }
     }
 
     async def loadRoutine {
         try { data = await seed_routine(); }
-        except Exception as e { error = friendly_error(str(e)); }
+        except Exception as e { showError(e); }
     }
 
     async can with entry {
@@ -301,9 +479,8 @@ def:pub app -> JsxElement {
         refreshing = True;
         try {
             data = await get_dashboard();
-            error = "";
         } except Exception as e {
-            error = friendly_error(str(e));
+            showError(e);
         } finally {
             refreshing = False;
         }
@@ -339,16 +516,15 @@ def:pub app -> JsxElement {
     <Pressable onPress={lambda { Keyboard.dismiss(); }} accessible={False} style={styles.tapArea}>
         <View style={styles.header}>
             <Text style={styles.eyebrow}>STUDYFLOW</Text>
-            <Text style={styles.title}>Today</Text>
+            <View style={styles.headerRow}>
+                <Text style={styles.title}>Today</Text>
+                <Pressable style={styles.addButton} onPress={openAdd} accessibilityLabel="Add a task">
+                    <Text style={styles.addButtonText}>+</Text>
+                </Pressable>
+            </View>
             <Text style={styles.subtitle}>{data.today if data is not None else "Loading your plan…"}</Text>
         </View>
 
-        {if error {
-            <View style={styles.error}>
-                <Text style={styles.errorText}>{error}</Text>
-                <Text style={styles.muted}>{"Server: " + (api_base_url() or "not set")}</Text>
-            </View>
-        }}
         {if data is not None and data.message {
             <View style={styles.notice}><Text style={styles.noticeText}>{data.message}</Text></View>
         }}
@@ -404,25 +580,6 @@ def:pub app -> JsxElement {
             </View>
 
             <View style={styles.panel}>
-                <Text style={styles.panelTitle}>Quick add</Text>
-                <View style={styles.form}>
-                    <TextInput style={styles.input} value={title} returnKeyType="done" onSubmitEditing={lambda { Keyboard.dismiss(); }} placeholder="What do you need to do?" placeholderTextColor="#81908c" onChangeText={lambda (value: str) { title = value; }}/>
-                    <View style={styles.row}>
-                        <TextInput style={[styles.input, styles.half]} value={course} returnKeyType="done" onSubmitEditing={lambda { Keyboard.dismiss(); }} placeholder="Course" placeholderTextColor="#81908c" onChangeText={lambda (value: str) { course = value; }}/>
-                        <TextInput style={[styles.input, styles.half]} value={place} returnKeyType="done" onSubmitEditing={lambda { Keyboard.dismiss(); }} placeholder="Location (optional)" placeholderTextColor="#81908c" onChangeText={lambda (value: str) { place = value; }}/>
-                    </View>
-                    <View style={styles.row}>
-                        <TextInput style={[styles.input, styles.half]} value={dueDate} returnKeyType="done" onSubmitEditing={lambda { Keyboard.dismiss(); }} placeholder="Due YYYY-MM-DD" placeholderTextColor="#81908c" autoCapitalize="none" onChangeText={lambda (value: str) { dueDate = value; }}/>
-                        <TextInput style={[styles.input, styles.half]} value={dueTime} returnKeyType="done" onSubmitEditing={lambda { Keyboard.dismiss(); }} placeholder="Time HH:MM (optional)" placeholderTextColor="#81908c" autoCapitalize="none" onChangeText={lambda (value: str) { dueTime = value; }}/>
-                    </View>
-                    <TextInput style={styles.input} value={estimate} returnKeyType="done" onSubmitEditing={lambda { Keyboard.dismiss(); }} placeholder="Estimated minutes" placeholderTextColor="#81908c" keyboardType="number-pad" onChangeText={lambda (value: str) { estimate = value; }}/>
-                    <Pressable style={styles.primary} disabled={busy} onPress={quickAdd}>
-                        <Text style={styles.primaryText}>{"Adding…" if busy else "+ Add & schedule"}</Text>
-                    </Pressable>
-                </View>
-            </View>
-
-            <View style={styles.panel}>
                 <View style={styles.panelHeading}>
                     <Text style={styles.panelTitle}>Reserved time</Text>
                     <Text style={styles.badge}>{str(len(data.reserved_blocks))} routines</Text>
@@ -440,10 +597,24 @@ def:pub app -> JsxElement {
                 <View style={styles.form}>
                     <TextInput style={styles.input} value={blockLabel} returnKeyType="done" onSubmitEditing={lambda { Keyboard.dismiss(); }} placeholder="Name, e.g. Sleep" placeholderTextColor="#a1a1aa" onChangeText={lambda (value: str) { blockLabel = value; }}/>
                     <TextInput style={styles.input} value={blockPlace} returnKeyType="done" onSubmitEditing={lambda { Keyboard.dismiss(); }} placeholder="Location (optional)" placeholderTextColor="#a1a1aa" onChangeText={lambda (value: str) { blockPlace = value; }}/>
-                    <View style={styles.row}>
-                        <TextInput style={[styles.input, styles.half]} value={blockStart} returnKeyType="done" onSubmitEditing={lambda { Keyboard.dismiss(); }} placeholder="23:00" placeholderTextColor="#a1a1aa" autoCapitalize="none" onChangeText={lambda (value: str) { blockStart = value; }}/>
-                        <TextInput style={[styles.input, styles.half]} value={blockEnd} returnKeyType="done" onSubmitEditing={lambda { Keyboard.dismiss(); }} placeholder="08:00" placeholderTextColor="#a1a1aa" autoCapitalize="none" onChangeText={lambda (value: str) { blockEnd = value; }}/>
-                    </View>
+                    <Text style={styles.fieldLabel}>Starts</Text>
+                    <TimePicker
+                        id="start"
+                        value={blockStart}
+                        optional={False}
+                        openKey={openTime}
+                        onOpen={lambda (k: str) { openTime = k; }}
+                        onChange={lambda (v: str) { blockStart = v; }}
+                    />
+                    <Text style={styles.fieldLabel}>Ends</Text>
+                    <TimePicker
+                        id="end"
+                        value={blockEnd}
+                        optional={False}
+                        openKey={openTime}
+                        onOpen={lambda (k: str) { openTime = k; }}
+                        onChange={lambda (v: str) { blockEnd = v; }}
+                    />
                     <Pressable style={styles.primary} disabled={busy} onPress={addBlock}>
                         <Text style={styles.primaryText}>Add reserved time (every day)</Text>
                     </Pressable>
@@ -452,5 +623,48 @@ def:pub app -> JsxElement {
         }}
     </Pressable>
     </ScrollView>
+    <Modal visible={showAdd} transparent={True} animationType="slide" onRequestClose={closeAdd}>
+        <KeyboardAvoidingView style={{"flex": 1}} behavior={"padding" if Platform.OS == "ios" else None}>
+        <Pressable style={styles.backdrop} onPress={closeAdd}>
+            <Pressable style={styles.sheet} onPress={lambda { Keyboard.dismiss(); }}>
+                <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{"gap": 12}}>
+                    <View style={styles.sheetHead}>
+                        <Text style={styles.panelTitle}>New task</Text>
+                        <Pressable onPress={closeAdd}><Text style={styles.closeText}>×</Text></Pressable>
+                    </View>
+                    <TextInput style={styles.input} value={title} returnKeyType="done" onSubmitEditing={lambda { Keyboard.dismiss(); }} placeholder="What do you need to do?" placeholderTextColor="#81908c" onChangeText={lambda (value: str) { title = value; }}/>
+                    <View style={styles.row}>
+                        <TextInput style={[styles.input, styles.half]} value={course} returnKeyType="done" onSubmitEditing={lambda { Keyboard.dismiss(); }} placeholder="Course" placeholderTextColor="#81908c" onChangeText={lambda (value: str) { course = value; }}/>
+                        <TextInput style={[styles.input, styles.half]} value={place} returnKeyType="done" onSubmitEditing={lambda { Keyboard.dismiss(); }} placeholder="Location (optional)" placeholderTextColor="#81908c" onChangeText={lambda (value: str) { place = value; }}/>
+                    </View>
+                    <Text style={styles.fieldLabel}>{"Due date: " + (dueDate if dueDate else "pick a day")}</Text>
+                    <MonthPicker
+                        cal={pickerCal}
+                        selected={dueDate}
+                        onPick={lambda (day: str) { dueDate = day; }}
+                        onShift={lambda (n: int) { loadPicker(pickerCal.anchor if pickerCal is not None else "", n); }}
+                    />
+                    <Text style={styles.fieldLabel}>Due time (optional)</Text>
+                    <TimePicker
+                        id="due"
+                        value={dueTime}
+                        optional={True}
+                        openKey={openTime}
+                        onOpen={lambda (k: str) { openTime = k; }}
+                        onChange={lambda (v: str) { dueTime = v; }}
+                    />
+                    {if not dueTime {
+                        <Text style={styles.muted}>No time set: due by the end of the day.</Text>
+                    }}
+                    <Text style={styles.fieldLabel}>Estimated work (minutes)</Text>
+                    <TextInput style={styles.input} value={estimate} returnKeyType="done" onSubmitEditing={lambda { Keyboard.dismiss(); }} placeholder="Minutes" placeholderTextColor="#81908c" keyboardType="number-pad" onChangeText={lambda (value: str) { estimate = value; }}/>
+                    <Pressable style={styles.primary} disabled={busy} onPress={quickAdd}>
+                        <Text style={styles.primaryText}>{"Adding…" if busy else "+ Add & schedule"}</Text>
+                    </Pressable>
+                </ScrollView>
+            </Pressable>
+        </Pressable>
+        </KeyboardAvoidingView>
+    </Modal>
     </KeyboardAvoidingView>
 }

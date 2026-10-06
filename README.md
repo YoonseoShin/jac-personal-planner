@@ -17,27 +17,33 @@ StudyFlow is a four-component Jac application (server, web, mobile, CLI) built f
 - **Stable plan + Reschedule.** Checking things off never reshuffles your day. A status card tells you when a Reschedule would help (missed or overlapping blocks, work that is not planned yet, or free time that opened up) and Reschedule re-plans only unfinished work from the current time.
 - **Calendar.** Day / Week / Month views with per-task colors (same course, same color), a deadline line, and a time axis that stretches busy hours and shrinks reserved or empty ones. Hover or tap any block for a detail bubble; hovering a Today item highlights its block.
 - **Tasks list.** Open / Done tabs, sorted by priority then due date, with Done, Reopen, edit, and delete.
+- **Live sync.** Web, phone, and CLI share one server; open screens refresh themselves every 10 seconds and when you come back to them.
 - **Readable errors.** Validation problems ("Due date cannot be in the past.") and connection problems are shown as plain sentences in every interface.
 
-## Components
+## How the four components fit together
 
 ```text
-Web  (planning + calendar) ─┐
-Mobile (today + quick add) ├──> Planner service (core/planner_service.jac) ──> Jac persistent graph
-CLI  (terminal capture)    ─┘      scheduling, validation, progress             Task, StudySession, ReservedBlock
+Web    (plan + calendar) ─┐
+Mobile (today + add)     ├──> Planner service (core/planner_service.jac) ──> Jac persistent graph
+CLI    (terminal)        ─┘      scheduling, validation, progress             Task, StudySession, ReservedBlock
 ```
 
-- **Server** (`core/planner_service.jac`): the data model, validation, the scheduler (incremental placement, full Reschedule, and a dry-run used for the status card), calendar layout, and tests. Shared error wording lives in `core/errors.jac`.
-- **Web** (`web/`): the full planning interface described above.
-- **Mobile** (`mobile/main.jac`, `mobile/api_base*.jac`): today's to-do list with check/uncheck, the reschedule status and button, open tasks with Done, quick add (with due time and location), and reserved-time management.
-- **CLI** (`cli/main.jac`): `add`, `today`, `list`, `done`, `task-done`, `block`, `unblock`, `routine`, `replan`, and `demo`.
+The **server** is the single source of truth. `core/planner_service.jac` holds the data model (tasks, work blocks, reserved time), stores it in Jac's persistent graph, and does all the planning: placing work into free time, Reschedule, progress, and validation. The **web app**, **mobile app**, and **CLI** hold no planning logic of their own. Each one calls the same service functions (`add_task`, `complete_session`, `replan`, `get_calendar`, …) over HTTP and shows the result in a way that suits its screen:
+
+- **Web** (`web/`): the full planning view. Calendar, task list, reserved time, and Reschedule.
+- **Mobile** (`mobile/`): today's to-do list to check off on the go, a **+** button to add tasks with a date calendar and time dropdowns, Done, Reschedule, and reserved time. `mobile/api_base*.jac` points the phone at the server; `mobile/device*.jac` holds the phone-only pieces (foreground detection, pull-to-refresh, alerts).
+- **CLI** (`cli/main.jac`): quick capture and checks from the terminal (`add`, `today`, `list`, `done`, `task-done`, `block`, `unblock`, `routine`, `replan`, `demo`).
+
+Because all three talk to one server and one database, a change made anywhere is the same change everywhere. Open screens refresh themselves, so you see it within seconds (see [Staying in sync](#staying-in-sync)). Shared code keeps them consistent too: error messages come from `core/errors.jac`, so the web app, the phone, and the terminal say the same thing.
 
 ## What makes it stand out
 
-- **It plans, not just lists.** Work is placed into real free time, respecting due times, reserved time, the current time, and priority.
-- **Predictable.** The plan only moves when you ask. Every moved block says where it came from, and the status card explains why a Reschedule is suggested. The suggestion comes from simulating the Reschedule without saving it.
-- **One system, three interfaces.** Web, mobile, and CLI share the same service, data, validation, and error messages.
-- **Tested.** 37 automated tests cover scheduling, deadlines and due times, reserved-time overlap, check/uncheck/Done/Reopen, move history, calendar layout, and error handling.
+- **It plans, not just lists.** You give a deadline and an estimate; StudyFlow finds the free time. It works around your classes and sleep, finishes before the due time, and spreads long tasks over the days before the deadline.
+- **One planner, three screens, always in sync.** Add a task from the terminal and it appears on the web calendar and on your phone within about 10 seconds, without reloading anything.
+- **A Reschedule button that knows when you need it.** The status card quietly simulates a Reschedule. It tells you exactly why one would help: you missed a block, blocks overlap, work isn't planned yet, or finishing early freed up time.
+- **Every change explains itself.** Moved work says where it came from ("Rescheduled from Tue, Oct 6 · 9:30 AM and 2 other blocks"). Finishing a whole task removes its remaining blocks for good.
+- **A calendar built for planning.** Each course has its own color and deadlines are drawn as a line. Busy hours stretch and reserved or empty hours shrink, so nothing overlaps. Tap any block for details, and hover a to-do to find it on the calendar.
+- **Fits a real student week.** Reserved time can repeat on chosen weekdays (Mon/Wed/Fri) and can't overlap. Tasks can have due times and locations. The phone app finds the server on its own.
 
 ## Prerequisites
 
@@ -49,65 +55,93 @@ CLI  (terminal capture)    ─┘      scheduling, validation, progress         
 jac --version
 ```
 
-## Run the web app and server
+## How to run
 
-From the repository root:
+All three interfaces use **one server**: the one `jac run` starts. Start it first, keep it running, and then use the web app, the CLI, and the phone app in any order. Run every command from the repository root.
+
+| Interface | Where it runs | Start it with | Needs |
+|---|---|---|---|
+| Server + web app | your computer, in a browser | `jac run` | nothing else |
+| CLI | a second terminal on the same computer | `jac run cli -- <command>` | `jac run` running, `JAC_APP_PLANNER_URL` set |
+| Mobile app | a phone (Expo Go) on the same Wi-Fi | `jac run --dev mobile` (in a second terminal) | `jac run` running |
+
+### 1. Server and web app
 
 ```bash
 jac run
 ```
 
-This serves the web app and the planner service together and keeps data between runs. Open the web URL that Jac prints (by default `http://localhost:8000`; the API is printed too, by default `http://localhost:8001`). If those ports are busy, Jac picks others, so use the printed values.
+- Starts the planner service (scheduling, storage) and the web app together. Data is saved and survives restarts.
+- Open the web address it prints, by default `http://localhost:8000`.
+- The API address is printed too, by default `http://localhost:8001`. The CLI and phone app connect to it. If a port is busy, Jac picks another one. In that case use the printed values.
+- `jac run --dev` does the same with hot reload, for development.
 
-For hot reload while developing: `jac run --dev`.
+First time? In the web app, click **Load demo tasks** (Tasks panel) and **Use a typical student routine** (Reserved time).
 
-New here? Click **Load demo tasks** in the Tasks panel and **Use a typical student routine** under Reserved time.
+### 2. CLI (terminal)
 
-## Use the CLI
-
-Keep `jac run` running. In another terminal, point the CLI at the planner service (use the API port `jac run` printed):
+In a second terminal, tell the CLI where the server's API is (once per terminal):
 
 ```bash
 export JAC_APP_PLANNER_URL=http://localhost:8001/api/planner
 ```
 
-Then:
+Then run commands as `jac run cli -- <command> [options]`:
 
-```bash
-jac run cli -- today
-jac run cli -- list
-jac run cli -- add "Finish CSE 449 project" --course "CSE 449" --due 2026-10-09 --minutes 240 --priority high
-jac run cli -- add "Quiz prep" --course "EECS 482" --due 2026-10-07 --time 09:30 --minutes 90 --location "Duderstadt Library"
-jac run cli -- done BLOCK_ID          # check off one block (ids are shown by `today`)
-jac run cli -- task-done TASK_ID      # mark a whole task done, or reopen it
-jac run cli -- block "Sleep" --category sleep --start 23:00 --end 08:00 --repeat daily
-jac run cli -- block "EECS 482 lecture" --category class --start 10:30 --end 12:00 --repeat mon,wed,fri --location "1670 Beyster"
-jac run cli -- routine
-jac run cli -- replan                 # Reschedule
-```
+| Command | What it does | Example |
+|---|---|---|
+| `today` | Shows today's blocks (with ids), the plan status, and your reserved time | `jac run cli -- today` |
+| `list` | Shows every task with progress and due date (with ids) | `jac run cli -- list` |
+| `add` | Adds a task and places its work into free time. Options: `--course`, `--due YYYY-MM-DD` (required), `--time HH:MM`, `--minutes`, `--priority high\|medium\|low`, `--location` | `jac run cli -- add "Quiz prep" --course "EECS 482" --due 2026-10-09 --time 09:30 --minutes 90 --location "Duderstadt Library"` |
+| `done` | Checks off one block (id from `today`) | `jac run cli -- done BLOCK_ID` |
+| `task-done` | Marks a whole task done and removes its remaining blocks, or reopens it (id from `list`) | `jac run cli -- task-done TASK_ID` |
+| `block` | Adds recurring reserved time. Options: `--start`/`--end HH:MM` (required), `--repeat daily\|weekdays\|weekends\|mon,wed,fri`, `--category`, `--location` | `jac run cli -- block "EECS 482 lecture" --category class --start 10:30 --end 12:00 --repeat mon,wed,fri` |
+| `unblock` | Removes reserved time (id from `today`) | `jac run cli -- unblock BLOCK_ID` |
+| `replan` | Reschedule: re-plans all unfinished work from now | `jac run cli -- replan` |
+| `routine` | Adds an example routine (classes, lunch, workout, sleep) when none exists | `jac run cli -- routine` |
+| `demo` | Adds demo tasks when the planner is empty | `jac run cli -- demo` |
 
-`jac run cli -- --help` and `jac run cli -- COMMAND --help` list every option. If the server is not reachable, the CLI says so and shows how to set `JAC_APP_PLANNER_URL`.
+`jac run cli -- --help` and `jac run cli -- <command> --help` list every option. If the server cannot be reached, the CLI says so and shows the `export` line to use.
 
-## Run the mobile app
+### 3. Mobile app (phone)
 
-The mobile app talks to the same server as the web app and CLI, so start that first.
-
-1. Keep `jac run` running (web app + planner service, API on port `8001`).
-2. In a second terminal, start the mobile app:
+1. Keep `jac run` running.
+2. In a second terminal:
 
    ```bash
    jac run --dev mobile
    ```
 
-3. On a phone on the same Wi-Fi as the computer, install **Expo Go** and scan the QR code (or enter the printed `exp://<computer-ip>:8081` URL in Expo Go).
+   The first run installs the mobile packages and takes a few minutes.
+3. On a phone on the **same Wi-Fi** as the computer, install **Expo Go**. Scan the QR code the command prints (iPhone: camera app; Android: Expo Go), or type the printed `exp://<computer-ip>:8081` address into Expo Go.
 
-The app finds the server by itself: it uses the computer it was loaded from, with API port `8001`. The screen shows the server address if it cannot connect.
+On the phone you can:
+
+- check and uncheck today's blocks;
+- see the plan status and press **Reschedule**;
+- mark tasks **Done**;
+- add a task with the **+** button next to *Today*, which opens a form with a calendar for the due date;
+- manage reserved time.
+
+The app finds the server by itself: it uses the computer it was loaded from with API port `8001`. If it cannot connect, the screen shows the address it tried.
 
 Notes:
 
-- With Jac 0.37.23, `jac run --dev mobile` also tries an Android build and stops with an *Android SDK license* message. Metro and Expo Go keep working, so you can ignore it for Expo Go testing. Accept the license only if you want an Android emulator or APK.
-- If `jac run` printed a different API port than `8001`, change it in `mobile/api_base.native.jac`.
-- `jac run --dev --platform web mobile` previews the mobile screens in a browser. Do not run it at the same time as the web dev server, because the two share Jac's build folder.
+- With Jac 0.37.23, `jac run --dev mobile` also tries an Android build and ends with an *Android SDK license* message. Metro and Expo Go keep working, so ignore it when testing with Expo Go. Accept the license only if you want an Android emulator or APK.
+- If `jac run` printed an API port other than `8001`, change it in `mobile/api_base.native.jac`.
+- `jac run --dev --platform web mobile` previews the phone screens in a browser. Don't run it at the same time as the web dev server, because the two share Jac's build folder.
+
+## Staying in sync
+
+The web app, phone app, and CLI read and write the same data on the same server, so a change made in one shows up in the others without any extra steps:
+
+| Where the change shows up | When |
+|---|---|
+| Web app | every 10 seconds while the page is open, and right away when you switch back to the tab |
+| Phone app | every 10 seconds while the app is open, right away when you return to the app, and when you pull the screen down |
+| CLI | every command reads the latest data |
+
+Example: add a task with `jac run cli -- add …`. Within about 10 seconds it appears on the web calendar and in the phone app. Check off a block on the phone, and the web app shows it done shortly after.
 
 ## Scheduling behavior
 
@@ -138,7 +172,7 @@ The algorithm is deterministic: the same task state produces the same plan.
 
 1. `jac run`, open the web URL, click **Load demo tasks** and **Use a typical student routine**.
 2. Look at the Week calendar: work sits between classes, lunch, and sleep, colored by course.
-3. `jac run cli -- add "Reading" --due <date> --minutes 60` (with `JAC_APP_PLANNER_URL` set) and refresh the web page: the new task is planned without moving anything else.
+3. `jac run cli -- add "Reading" --due <date> --minutes 60` (with `JAC_APP_PLANNER_URL` set): within about 10 seconds the new task appears on the web page, planned without moving anything else.
 4. Check off today's first block early. The status card says **Free time opened up**. Press **Reschedule** and later work moves up, each moved block saying where it came from.
 5. Run `jac run cli -- today` to see the same plan in the terminal.
 
@@ -158,6 +192,7 @@ web/main.jac               web planning interface
 web/styles.css             web styles
 mobile/main.jac            mobile app (@jac/mobui)
 mobile/api_base*.jac       points the phone app at the `jac run` server (native) / no-op (browser)
+mobile/device*.jac         phone-only helpers: foreground detection, pull-to-refresh (native) / browser fallbacks
 cli/main.jac               terminal commands
 jac.toml                   four-app workspace configuration
 docs/                      screenshot used above

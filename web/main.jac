@@ -949,7 +949,7 @@ def:pub app -> JsxElement {
                                         <span className="optional">optional</span>
                                     }}
                                 </span>
-                                <input type="time" value={dueTime} onChange={lambda (e: ChangeEvent) { dueTime = e.target.value; }}/>
+                                <input type="time" step="300" value={dueTime} onChange={lambda (e: ChangeEvent) { dueTime = e.target.value; }}/>
                             </label>
                         </div>
                         <span className="field-hint">{"Work will be finished before " + (clock_text(dueTime) if dueTime else "the end of the day") + " on the due date."}</span>
@@ -1052,8 +1052,8 @@ def:pub app -> JsxElement {
                             }}
                         </div>
                         <div className="row">
-                            <label>Starts<input type="time" value={blockStart} required onChange={lambda (e: ChangeEvent) { blockStart = e.target.value; }}/></label>
-                            <label>Ends<input type="time" value={blockEnd} required onChange={lambda (e: ChangeEvent) { blockEnd = e.target.value; }}/></label>
+                            <label>Starts<input type="time" step="300" value={blockStart} required onChange={lambda (e: ChangeEvent) { blockStart = e.target.value; }}/></label>
+                            <label>Ends<input type="time" step="300" value={blockEnd} required onChange={lambda (e: ChangeEvent) { blockEnd = e.target.value; }}/></label>
                         </div>
                         {if error {
                             <div className="form-error" role="alert">{error}</div>

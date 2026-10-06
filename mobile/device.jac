@@ -18,3 +18,9 @@ def:pub watch_foreground(onActive: Callable[[], None]) -> Callable[[], None] {
 def:pub PullToRefresh(refreshing: bool, onRefresh: Callable[[], None]) -> JsxElement | None {
     return None;
 }
+
+# Browser preview: the page's own alert box.
+def:pub show_alert(title: str, message: str) {
+    win: any = globalThis;  # jac:ignore[W1037]
+    win.alert(title + chr(10) + chr(10) + message);
+}
