@@ -29,7 +29,7 @@ CLI  (terminal capture)    ─┘      scheduling, validation, progress         
 
 - **Server** (`core/planner_service.jac`): the data model, validation, the scheduler (incremental placement, full Reschedule, and a dry-run used for the status card), calendar layout, and tests. Shared error wording lives in `core/errors.jac`.
 - **Web** (`web/`): the full planning interface described above.
-- **Mobile** (`mobile/main.jac`): today's to-do list with check/uncheck, the reschedule status and button, open tasks with Done, quick add (with due time and location), and reserved-time management.
+- **Mobile** (`mobile/main.jac`, `mobile/api_base*.jac`): today's to-do list with check/uncheck, the reschedule status and button, open tasks with Done, quick add (with due time and location), and reserved-time management.
 - **CLI** (`cli/main.jac`): `add`, `today`, `list`, `done`, `task-done`, `block`, `unblock`, `routine`, `replan`, and `demo`.
 
 ## What makes it stand out
@@ -90,24 +90,24 @@ jac run cli -- replan                 # Reschedule
 
 ## Run the mobile app
 
-The mobile app's dev server starts its own copy of the planner API, which uses the same saved data as the web app.
+The mobile app talks to the same server as the web app and CLI, so start that first.
 
-**Run it on its own.** The web and mobile dev servers share Jac's build folder, so stop `jac run` first and start it again afterwards.
+1. Keep `jac run` running (web app + planner service, API on port `8001`).
+2. In a second terminal, start the mobile app:
 
-Browser preview of the mobile app (fastest):
+   ```bash
+   jac run --dev mobile
+   ```
 
-```bash
-jac run --dev --platform web mobile
-```
+3. On a phone on the same Wi-Fi as the computer, install **Expo Go** and scan the QR code (or enter the printed `exp://<computer-ip>:8081` URL in Expo Go).
 
-Native app on a simulator or phone (Expo):
+The app finds the server by itself: it uses the computer it was loaded from, with API port `8001`. The screen shows the server address if it cannot connect.
 
-```bash
-jac setup mobile
-jac run --dev mobile
-```
+Notes:
 
-Follow the QR-code or simulator instructions that Expo prints. A physical phone must be on the same network as the computer.
+- With Jac 0.37.23, `jac run --dev mobile` also tries an Android build and stops with an *Android SDK license* message. Metro and Expo Go keep working, so you can ignore it for Expo Go testing. Accept the license only if you want an Android emulator or APK.
+- If `jac run` printed a different API port than `8001`, change it in `mobile/api_base.native.jac`.
+- `jac run --dev --platform web mobile` previews the mobile screens in a browser. Do not run it at the same time as the web dev server, because the two share Jac's build folder.
 
 ## Scheduling behavior
 
@@ -157,6 +157,7 @@ core/errors.jac            readable error messages shared by web, mobile, and CL
 web/main.jac               web planning interface
 web/styles.css             web styles
 mobile/main.jac            mobile app (@jac/mobui)
+mobile/api_base*.jac       points the phone app at the `jac run` server (native) / no-op (browser)
 cli/main.jac               terminal commands
 jac.toml                   four-app workspace configuration
 docs/                      screenshot used above

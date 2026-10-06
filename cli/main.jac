@@ -203,8 +203,8 @@ async def dispatch(inv: Invocation) -> int {
         message = friendly_error(str(e));
         print("studyflow: " + message, file=sys.stderr);
         if message != MSG_UNREACHABLE { return 1; }
-        print("hint: start the server with `jac run`, then point the CLI at it:", file=sys.stderr);
-        print("      export JAC_APP_PLANNER_URL=http://localhost:8002/api/planner", file=sys.stderr);
+        print("hint: start the server with `jac run`, then point the CLI at its API port (8001 unless jac run printed another):", file=sys.stderr);
+        print("      export JAC_APP_PLANNER_URL=http://localhost:8001/api/planner", file=sys.stderr);
         return 3;
     } except Exception as e {
         print("studyflow: " + friendly_error(str(e)), file=sys.stderr);

@@ -21,7 +21,18 @@ import from core.planner_service {
     update_task
 }
 import from core.errors { friendly_error }
+import from "react" { useEffect }
 import "./styles.css";
+
+# How often an open page re-reads the plan, so changes made on the phone or
+# in the CLI show up without a manual reload.
+glob REFRESH_MS: int = 10000;
+
+# The type stubs lack `document.visibilityState`; read it untyped.
+def page_visible -> bool {
+    doc: any = globalThis.document;  # jac:ignore[W1037,W6001]
+    return doc.visibilityState != "hidden";
+}
 
 
 def minute_text(total: int) -> str {
@@ -503,6 +514,8 @@ def:pub app -> JsxElement {
         quickTitle: str = "",
         taskTab: str = "open",
         focusId: str = "",
+        tick: int = 0,
+        pollRef: Ref[int] = Ref(0),
         reopening: TaskView | None = None,
         extraMinutes: str = "30",
         tip: CalendarItem | None = None,
@@ -738,6 +751,45 @@ def:pub app -> JsxElement {
     }
 
     async can with entry { await loadData(); }
+
+    # Quietly re-read the plan (no spinner, no toast changes). Skipped while
+    # an action is in flight so it never races a save.
+    async def refreshQuietly {
+        if busy or loading { return; }
+        try {
+            fresh = await get_dashboard();
+            data = fresh;
+            if cal is not None {
+                cal = await get_calendar(calView, calAnchor, 0);
+            }
+        } except Exception {
+            return;
+        }
+    }
+
+    # The timer and listeners only bump `tick`; the refresh runs in the effect
+    # below so it always sees the current view and week.
+    useEffect(lambda {
+        def bump {
+            pollRef.current = (pollRef.current or 0) + 1;
+            tick = pollRef.current;
+        }
+        def onVisible {
+            if page_visible() { bump(); }
+        }
+        timer = setInterval(lambda { if page_visible() { bump(); } }, REFRESH_MS);
+        document.addEventListener("visibilitychange", onVisible);
+        window.addEventListener("focus", onVisible);
+        return lambda {
+            clearInterval(timer);
+            document.removeEventListener("visibilitychange", onVisible);
+            window.removeEventListener("focus", onVisible);
+        };
+    }, []);
+
+    async can with [tick] entry {
+        if tick > 0 { await refreshQuietly(); }
+    }
 
     <div className="page">
         <header className="top">

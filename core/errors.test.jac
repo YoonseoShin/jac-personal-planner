@@ -12,6 +12,9 @@ test "python internals are hidden behind a generic message" {
 
 test "connection and server version problems get specific advice" {
     assert friendly_error("get_dashboard: TypeError: Failed to fetch") == MSG_UNREACHABLE;
+    assert friendly_error("get_dashboard: TypeError: Network request failed") == MSG_UNREACHABLE;
+    assert friendly_error("bridge to 'planner.get_dashboard' failed: sv-to-sv RPC 'planner.get_dashboard' failed after 3 attempts: localhost:8002: Multiple exceptions: [Errno 61] Connect call failed ('127.0.0.1', 8002)") == MSG_UNREACHABLE;
+    assert friendly_error("get_dashboard: fetch failed: UnexpectedException: Could not connect to the server.") == MSG_UNREACHABLE;
     assert friendly_error("Function get_calendar failed: {\"detail\": \"Method Not Allowed\"}") == MSG_OUTDATED;
     assert friendly_error("Request timed out") == MSG_TIMEOUT;
     assert friendly_error("bridge to 'planner.add_task' failed: app 'planner' is not registered; set JAC_APP_PLANNER_URL") == MSG_UNREACHABLE;

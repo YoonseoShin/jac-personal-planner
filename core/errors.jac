@@ -38,7 +38,7 @@ def friendly_error(raw: str) -> str {
     if message and is_user_message(message) { return message; }
     code = field_value(text, "code");
     detail = field_value(text, "detail").lower();
-    for marker in ["failed to fetch", "networkerror", "load failed", "connection refused", "econnrefused", "cannot connect", "unavailable", "is not registered"] {
+    for marker in ["failed to fetch", "network request failed", "could not connect", "fetch failed", "connect call failed", "errno 61", "errno 111", "networkerror", "load failed", "connection refused", "econnrefused", "cannot connect", "unavailable", "is not registered"] {
         if marker in low { return MSG_UNREACHABLE; }
     }
     for marker in ["timed out", "timeout", "aborterror"] {

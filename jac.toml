@@ -15,6 +15,7 @@ entry-point = "mobile.main"
 [apps.mobile.dependencies]
 [apps.mobile.dependencies.npm]
 react-native-web = "^0.21.2"
+expo-constants = "~57.0.17"
 
 [apps.cli]
 kind = "cli"

@@ -1,5 +1,8 @@
 import from "@jac/mobui" {
     ActivityIndicator,
+    Keyboard,
+    KeyboardAvoidingView,
+    Platform,
     Pressable,
     ScrollView,
     StyleSheet,
@@ -8,6 +11,13 @@ import from "@jac/mobui" {
     View
 }
 import from core.errors { friendly_error }
+import from mobile.api_base { api_base_url, configure_api_base }
+import from "react" { useEffect }
+import from mobile.device { PullToRefresh, is_foreground, watch_foreground }
+
+# How often an open app re-reads the plan, so changes made on the web or in
+# the CLI show up without reopening the app.
+glob REFRESH_MS: int = 10000;
 import from core.planner_service {
     DashboardData,
     ReservedBlockView,
@@ -80,6 +90,7 @@ glob styles = StyleSheet.create({
     blockTitle: {fontSize: 13, color: "#18181b", fontWeight: "700"},
     removeText: {fontSize: 12, color: "#dc2626", fontWeight: "700"},
     helper: {fontSize: 12, lineHeight: 18, color: "#71717a"},
+    tapArea: {gap: 18},
     status: {flexDirection: "row", alignItems: "center", gap: 12, borderRadius: 14, padding: 14, borderWidth: 1},
     statusOk: {backgroundColor: "#ecfdf5", borderColor: "#bbf7d0"},
     statusWarn: {backgroundColor: "#fffbeb", borderColor: "#fcd34d"},
@@ -194,11 +205,17 @@ def:pub app -> JsxElement {
         blockLabel: str = "",
         blockPlace: str = "",
         blockStart: str = "23:00",
-        blockEnd: str = "08:00";
+        blockEnd: str = "08:00",
+        refreshing: bool = False,
+        tick: int = 0,
+        pollRef: Ref[int] = Ref(0);
 
     async def loadData {
         try { loading = True; data = await get_dashboard(); error = ""; }
-        except Exception as e { error = friendly_error(str(e)); }
+        except Exception as e {
+            console.warn("[studyflow] load failed: " + str(e));
+            error = friendly_error(str(e));
+        }
         finally { loading = False; }
     }
 
@@ -218,6 +235,7 @@ def:pub app -> JsxElement {
         if busy { return; }
         try {
             busy = True;
+            Keyboard.dismiss();
             data = await add_task(title, course, dueDate, int(estimate), "medium", dueTime, place);
             title = "";
             course = "";
@@ -245,6 +263,7 @@ def:pub app -> JsxElement {
         if busy { return; }
         try {
             busy = True;
+            Keyboard.dismiss();
             data = await add_reserved_block(
                 blockLabel, "other", blockStart, blockEnd, "daily", blockPlace
             );
@@ -265,9 +284,59 @@ def:pub app -> JsxElement {
         except Exception as e { error = friendly_error(str(e)); }
     }
 
-    async can with entry { await loadData(); }
+    async can with entry {
+        configure_api_base();
+        await loadData();
+    }
 
-    <ScrollView style={styles.screen} contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
+    # Quietly re-read the plan (no spinner). Skipped while an action is in
+    # flight so it never races a save.
+    async def refreshQuietly {
+        if busy or loading { return; }
+        try { data = await get_dashboard(); }
+        except Exception { return; }
+    }
+
+    async def pullRefresh {
+        refreshing = True;
+        try {
+            data = await get_dashboard();
+            error = "";
+        } except Exception as e {
+            error = friendly_error(str(e));
+        } finally {
+            refreshing = False;
+        }
+    }
+
+    # Every 10 seconds, and whenever the app comes back to the foreground,
+    # bump `tick`; the effect below does the refresh with current state.
+    useEffect(lambda {
+        def bump {
+            pollRef.current = (pollRef.current or 0) + 1;
+            tick = pollRef.current;
+        }
+        timer = setInterval(lambda { if is_foreground() { bump(); } }, REFRESH_MS);
+        stop_watching = watch_foreground(bump);
+        return lambda {
+            clearInterval(timer);
+            stop_watching();
+        };
+    }, []);
+
+    async can with [tick] entry {
+        if tick > 0 { await refreshQuietly(); }
+    }
+
+    <KeyboardAvoidingView style={styles.screen} behavior={"padding" if Platform.OS == "ios" else None}>
+    <ScrollView
+        style={styles.screen}
+        contentContainerStyle={styles.body}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        refreshControl={PullToRefresh(refreshing, pullRefresh)}
+    >
+    <Pressable onPress={lambda { Keyboard.dismiss(); }} accessible={False} style={styles.tapArea}>
         <View style={styles.header}>
             <Text style={styles.eyebrow}>STUDYFLOW</Text>
             <Text style={styles.title}>Today</Text>
@@ -275,7 +344,10 @@ def:pub app -> JsxElement {
         </View>
 
         {if error {
-            <View style={styles.error}><Text style={styles.errorText}>{error}</Text></View>
+            <View style={styles.error}>
+                <Text style={styles.errorText}>{error}</Text>
+                <Text style={styles.muted}>{"Server: " + (api_base_url() or "not set")}</Text>
+            </View>
         }}
         {if data is not None and data.message {
             <View style={styles.notice}><Text style={styles.noticeText}>{data.message}</Text></View>
@@ -334,16 +406,16 @@ def:pub app -> JsxElement {
             <View style={styles.panel}>
                 <Text style={styles.panelTitle}>Quick add</Text>
                 <View style={styles.form}>
-                    <TextInput style={styles.input} value={title} placeholder="What do you need to do?" placeholderTextColor="#81908c" onChangeText={lambda (value: str) { title = value; }}/>
+                    <TextInput style={styles.input} value={title} returnKeyType="done" onSubmitEditing={lambda { Keyboard.dismiss(); }} placeholder="What do you need to do?" placeholderTextColor="#81908c" onChangeText={lambda (value: str) { title = value; }}/>
                     <View style={styles.row}>
-                        <TextInput style={[styles.input, styles.half]} value={course} placeholder="Course" placeholderTextColor="#81908c" onChangeText={lambda (value: str) { course = value; }}/>
-                        <TextInput style={[styles.input, styles.half]} value={place} placeholder="Location (optional)" placeholderTextColor="#81908c" onChangeText={lambda (value: str) { place = value; }}/>
+                        <TextInput style={[styles.input, styles.half]} value={course} returnKeyType="done" onSubmitEditing={lambda { Keyboard.dismiss(); }} placeholder="Course" placeholderTextColor="#81908c" onChangeText={lambda (value: str) { course = value; }}/>
+                        <TextInput style={[styles.input, styles.half]} value={place} returnKeyType="done" onSubmitEditing={lambda { Keyboard.dismiss(); }} placeholder="Location (optional)" placeholderTextColor="#81908c" onChangeText={lambda (value: str) { place = value; }}/>
                     </View>
                     <View style={styles.row}>
-                        <TextInput style={[styles.input, styles.half]} value={dueDate} placeholder="Due YYYY-MM-DD" placeholderTextColor="#81908c" autoCapitalize="none" onChangeText={lambda (value: str) { dueDate = value; }}/>
-                        <TextInput style={[styles.input, styles.half]} value={dueTime} placeholder="Time HH:MM (optional)" placeholderTextColor="#81908c" autoCapitalize="none" onChangeText={lambda (value: str) { dueTime = value; }}/>
+                        <TextInput style={[styles.input, styles.half]} value={dueDate} returnKeyType="done" onSubmitEditing={lambda { Keyboard.dismiss(); }} placeholder="Due YYYY-MM-DD" placeholderTextColor="#81908c" autoCapitalize="none" onChangeText={lambda (value: str) { dueDate = value; }}/>
+                        <TextInput style={[styles.input, styles.half]} value={dueTime} returnKeyType="done" onSubmitEditing={lambda { Keyboard.dismiss(); }} placeholder="Time HH:MM (optional)" placeholderTextColor="#81908c" autoCapitalize="none" onChangeText={lambda (value: str) { dueTime = value; }}/>
                     </View>
-                    <TextInput style={styles.input} value={estimate} placeholder="Estimated minutes" placeholderTextColor="#81908c" keyboardType="number-pad" onChangeText={lambda (value: str) { estimate = value; }}/>
+                    <TextInput style={styles.input} value={estimate} returnKeyType="done" onSubmitEditing={lambda { Keyboard.dismiss(); }} placeholder="Estimated minutes" placeholderTextColor="#81908c" keyboardType="number-pad" onChangeText={lambda (value: str) { estimate = value; }}/>
                     <Pressable style={styles.primary} disabled={busy} onPress={quickAdd}>
                         <Text style={styles.primaryText}>{"Adding…" if busy else "+ Add & schedule"}</Text>
                     </Pressable>
@@ -366,11 +438,11 @@ def:pub app -> JsxElement {
                     }
                 }}
                 <View style={styles.form}>
-                    <TextInput style={styles.input} value={blockLabel} placeholder="Name, e.g. Sleep" placeholderTextColor="#a1a1aa" onChangeText={lambda (value: str) { blockLabel = value; }}/>
-                    <TextInput style={styles.input} value={blockPlace} placeholder="Location (optional)" placeholderTextColor="#a1a1aa" onChangeText={lambda (value: str) { blockPlace = value; }}/>
+                    <TextInput style={styles.input} value={blockLabel} returnKeyType="done" onSubmitEditing={lambda { Keyboard.dismiss(); }} placeholder="Name, e.g. Sleep" placeholderTextColor="#a1a1aa" onChangeText={lambda (value: str) { blockLabel = value; }}/>
+                    <TextInput style={styles.input} value={blockPlace} returnKeyType="done" onSubmitEditing={lambda { Keyboard.dismiss(); }} placeholder="Location (optional)" placeholderTextColor="#a1a1aa" onChangeText={lambda (value: str) { blockPlace = value; }}/>
                     <View style={styles.row}>
-                        <TextInput style={[styles.input, styles.half]} value={blockStart} placeholder="23:00" placeholderTextColor="#a1a1aa" autoCapitalize="none" onChangeText={lambda (value: str) { blockStart = value; }}/>
-                        <TextInput style={[styles.input, styles.half]} value={blockEnd} placeholder="08:00" placeholderTextColor="#a1a1aa" autoCapitalize="none" onChangeText={lambda (value: str) { blockEnd = value; }}/>
+                        <TextInput style={[styles.input, styles.half]} value={blockStart} returnKeyType="done" onSubmitEditing={lambda { Keyboard.dismiss(); }} placeholder="23:00" placeholderTextColor="#a1a1aa" autoCapitalize="none" onChangeText={lambda (value: str) { blockStart = value; }}/>
+                        <TextInput style={[styles.input, styles.half]} value={blockEnd} returnKeyType="done" onSubmitEditing={lambda { Keyboard.dismiss(); }} placeholder="08:00" placeholderTextColor="#a1a1aa" autoCapitalize="none" onChangeText={lambda (value: str) { blockEnd = value; }}/>
                     </View>
                     <Pressable style={styles.primary} disabled={busy} onPress={addBlock}>
                         <Text style={styles.primaryText}>Add reserved time (every day)</Text>
@@ -378,5 +450,7 @@ def:pub app -> JsxElement {
                 </View>
             </View>
         }}
+    </Pressable>
     </ScrollView>
+    </KeyboardAvoidingView>
 }
